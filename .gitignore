@@ -10,3 +10,6 @@ console.*
 ({
 {
 gh
+
+.claude/
+CLAUDE.md
