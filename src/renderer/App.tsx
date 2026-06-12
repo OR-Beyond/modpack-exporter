@@ -14,6 +14,7 @@ import PullResultPopup from './components/PullResultPopup';
 import type {
   AppConfig,
   CommitCard,
+  CommitChanges,
   CommitFile,
   GitHubUser,
   Issue,
@@ -59,6 +60,12 @@ export default function App() {
   // ── Background auto-sync state ─────────────────────────────────────────────
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
 
+  // ── Undo last push state ───────────────────────────────────────────────────
+  const [isUndoingLastPush, setIsUndoingLastPush] = useState(false);
+
+  // ── Commit cache — tracks newest SHA so focus-refresh skips setCommits ─────
+  const lastCommitShaRef = React.useRef<string | null>(null);
+
   // ── Auth check ─────────────────────────────────────────────────────────────
   const checkAuth = useCallback(async () => {
     const r = await window.electron.auth.check();
@@ -87,71 +94,139 @@ export default function App() {
 
   const loadGitStatus = useCallback(async () => {
     const r = await window.electron.git.status();
-    if (r.success && r.data) setSyncStatus(r.data);
+    if (r.success && r.data) {
+      setSyncStatus(prev => {
+        const n = r.data!;
+        if (
+          prev.branch === n.branch &&
+          prev.ahead === n.ahead &&
+          prev.behind === n.behind &&
+          prev.lastPull === n.lastPull &&
+          prev.modified.length === n.modified.length &&
+          prev.modified.every((m, i) => m === n.modified[i])
+        ) return prev;
+        return n;
+      });
+    }
   }, []);
 
   const loadIssues = useCallback(async (cfg: AppConfig) => {
     const parsed = parseRepoUrl(cfg.github_repo);
     if (!parsed) return;
     const r = await window.electron.github.getIssues(parsed);
-    if (r.success && r.data) setIssues(r.data);
+    if (r.success && r.data) {
+      setIssues(prev => {
+        if (
+          prev.length === r.data!.length &&
+          prev.every((issue, i) => issue.number === r.data![i].number)
+        ) return prev;
+        return r.data!;
+      });
+    }
   }, []);
 
   const enrichCommitDetails = useCallback(
     async (cards: CommitCard[], owner: string, repo: string) => {
-      for (const card of cards.slice(0, 8)) {
-        const r = await window.electron.github.getCommitFiles({ owner, repo, sha: card.sha });
-        if (r.success && r.data) {
+      await Promise.all(
+        cards.slice(0, 8).map(async card => {
+          const [r, changesRes] = await Promise.all([
+            window.electron.github.getCommitFiles({ owner, repo, sha: card.sha }),
+            window.electron.git.commitChanges(card.sha),
+          ]);
+
+          let changes: CommitChanges | undefined;
+          if (changesRes.success && changesRes.data &&
+              (changesRes.data.mods.length > 0 || changesRes.data.otherFiles.length > 0)) {
+            changes = changesRes.data;
+          } else if (r.success && r.data) {
+            changes = {
+              mods: r.data.modChanges.map(mc => ({
+                slug: mc.name.toLowerCase().replace(/\s+/g, '-'),
+                name: mc.name,
+                iconUrl: null,
+                versionNumber: null,
+                status: mc.type,
+              })),
+              otherFiles: r.data.files.map(f => ({
+                path: f.path,
+                status: f.status as 'added' | 'modified' | 'removed',
+              })),
+            };
+          }
+
           setCommits(prev =>
             prev.map(c =>
               c.sha === card.sha
                 ? {
                     ...c,
-                    files: r.data!.files,
-                    modChanges: r.data!.modChanges,
-                    configChanged: r.data!.configChanged,
+                    files: r.success && r.data ? r.data.files : c.files,
+                    modChanges: r.success && r.data ? r.data.modChanges : c.modChanges,
+                    configChanged: r.success && r.data ? r.data.configChanged : c.configChanged,
+                    changes,
                     detailsLoaded: true,
                   }
                 : c
             )
           );
-        }
-      }
+        })
+      );
     },
     []
   );
 
   const loadCommits = useCallback(
-    async (cfg: AppConfig) => {
+    async (cfg: AppConfig, since?: string): Promise<CommitCard[]> => {
       const parsed = parseRepoUrl(cfg.github_repo);
-      if (!parsed) return;
-      setIsLoadingCommits(true);
+      if (!parsed) return [];
+      if (!since) setIsLoadingCommits(true);
       try {
         const r = await window.electron.github.getCommits({
           ...parsed,
           branch: cfg.github_branch || 'main',
         });
-        if (r.success && r.data) {
-          const cards: CommitCard[] = r.data.map((c: any) => ({
-            sha: c.sha,
-            message: c.commit.message.split('\n')[0],
-            author: {
-              login: c.author?.login || c.commit.author?.name || 'unknown',
-              avatar_url: c.author?.avatar_url || 'https://github.com/ghost.png',
-              html_url: c.author?.html_url || '',
-            },
-            date: c.commit.author?.date || new Date().toISOString(),
-            url: c.html_url,
-            modChanges: [] as ModChange[],
-            configChanged: false,
-            files: [] as CommitFile[],
-            detailsLoaded: false,
-          }));
-          setCommits(cards);
-          enrichCommitDetails(cards, parsed.owner, parsed.repo);
+        if (!r.success || !r.data) return [];
+
+        const allCards: CommitCard[] = r.data.map((c: any) => ({
+          sha: c.sha,
+          message: c.commit.message.split('\n')[0],
+          author: {
+            login: c.author?.login || c.commit.author?.name || 'unknown',
+            avatar_url: c.author?.avatar_url || 'https://github.com/ghost.png',
+            html_url: c.author?.html_url || '',
+          },
+          date: c.commit.author?.date || new Date().toISOString(),
+          url: c.html_url,
+          modChanges: [] as ModChange[],
+          configChanged: false,
+          files: [] as CommitFile[],
+          detailsLoaded: false,
+        }));
+
+        if (since) {
+          // Nothing new — newest remote commit equals our cached SHA
+          if (allCards.length > 0 && allCards[0].sha === since) return [];
+          const sinceIdx = allCards.findIndex(c => c.sha === since);
+          if (sinceIdx > 0) {
+            // Commits at 0..sinceIdx-1 are new
+            const newCards = allCards.slice(0, sinceIdx);
+            setCommits(prev => {
+              const existingShas = new Set(prev.map(c => c.sha));
+              const deduped = newCards.filter(c => !existingShas.has(c.sha));
+              if (deduped.length === 0) return prev;
+              return [...deduped, ...prev];
+            });
+            enrichCommitDetails(newCards, parsed.owner, parsed.repo);
+            return newCards;
+          }
+          // since SHA not found in API window — fall through to full refresh
         }
+
+        // Full refresh (initial load or since SHA fell outside API window)
+        setCommits(allCards);
+        enrichCommitDetails(allCards, parsed.owner, parsed.repo);
+        return allCards;
       } finally {
-        setIsLoadingCommits(false);
+        if (!since) setIsLoadingCommits(false);
       }
     },
     [enrichCommitDetails]
@@ -166,7 +241,7 @@ export default function App() {
       setConfig(cfgRes.data);
       const projectId =
         (await window.electron.settings.get('modrinthProjectId').catch(() => null)) || 'O5wGsyGR';
-      const [mvRes, mrRes] = await Promise.all([
+      const [mvRes, mrRes, initialCards] = await Promise.all([
         window.electron.export.manifestVersion(),
         window.electron.export.latestModrinthVersion(projectId).catch(() => ({ version_number: null as null })),
         loadCommits(cfgRes.data),
@@ -175,6 +250,7 @@ export default function App() {
       ]);
       if (mvRes.success) setManifestVersion(mvRes.versionId);
       if (mrRes.version_number) setModrinthRelease(mrRes.version_number);
+      if (initialCards && initialCards.length > 0) lastCommitShaRef.current = initialCards[0].sha;
     }
 
     // Surface a hint if modpack root isn't configured yet.
@@ -186,18 +262,40 @@ export default function App() {
       return;
     }
 
-    // Auto-pull silently in background after dashboard loads
+    // Auto-sync on launch — same handler as manual pull, with index.lock retry
     void (async () => {
       setIsAutoSyncing(true);
       try {
-        const r = await window.electron.git.pull();
-        if (r.success) {
-          const [, cfgR] = await Promise.all([loadGitStatus(), window.electron.config.read()]);
-          if (cfgR.success && cfgR.data) await loadCommits(cfgR.data);
-        } else if (r.error) {
-          toast.error(`Auto-sync failed: ${r.error}`);
+        const applyResult = (result: any) => {
+          const hasChanges =
+            (result.addedMods?.length || 0) +
+            (result.updatedMods?.length || 0) +
+            (result.removedMods?.length || 0) +
+            (result.changedFiles?.length || 0) > 0;
+          if (hasChanges) setPullResult(result);
+        };
+
+        const result = await window.electron.git.pull();
+        if (result?.success) {
+          await loadGitStatus();
+          applyResult(result);
+        } else if (result?.error?.includes('index.lock')) {
+          // Lock file from a previous crash — handler will have cleaned it; retry once
+          console.warn('[auto-sync] index.lock detected, retrying in 2s…');
+          await new Promise(res => setTimeout(res, 2000));
+          const retry = await window.electron.git.pull();
+          if (retry?.success) {
+            await loadGitStatus();
+            applyResult(retry);
+          } else {
+            console.warn('[auto-sync] retry failed:', retry?.error);
+          }
+        } else {
+          console.warn('[auto-sync] pull failed:', result?.error);
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[auto-sync] unexpected error:', e);
+      }
       setIsAutoSyncing(false);
     })();
   }, [loadConfig, loadExportState, loadCommits, loadIssues, loadGitStatus]);
@@ -219,7 +317,9 @@ export default function App() {
       if (now - lastFocusRefresh.current < 30_000) return;
       lastFocusRefresh.current = now;
       if (config) {
-        loadCommits(config);
+        loadCommits(config, lastCommitShaRef.current ?? undefined).then(newCards => {
+          if (newCards.length > 0) lastCommitShaRef.current = newCards[0].sha;
+        });
         loadGitStatus();
         loadIssues(config);
       }
@@ -242,16 +342,55 @@ export default function App() {
     toast.dismiss(tid);
     if (r.success) {
       toast.success('Pulled & synced mods');
-      await loadGitStatus();
-      if (config) await loadCommits(config);
+      // Refresh UI state — wrapped so an exception here never blocks the popup
+      try {
+        await loadGitStatus();
+        if (config) {
+          const refreshed = await loadCommits(config);
+          if (refreshed.length > 0) lastCommitShaRef.current = refreshed[0].sha;
+        }
+      } catch (e) {
+        console.warn('[handlePull] post-pull refresh failed (popup will still show):', e);
+      }
       const hasChanges =
-        (r.addedMods?.length ?? 0) +
-        (r.updatedMods?.length ?? 0) +
-        (r.removedMods?.length ?? 0) +
-        (r.changedFiles?.length ?? 0) > 0;
+        (r.addedMods?.length || 0) +
+        (r.updatedMods?.length || 0) +
+        (r.removedMods?.length || 0) +
+        (r.changedFiles?.length || 0) > 0;
       if (hasChanges) setPullResult(r);
     } else {
       toast.error(`Pull failed: ${r.error}`);
+    }
+  };
+
+  const handleUndoLastPush = async () => {
+    const confirmed = window.confirm(
+      'Undo your last push? This will revert all changes from your most recent push and update everyone.'
+    );
+    if (!confirmed) return;
+
+    setIsUndoingLastPush(true);
+    const tid = toast.loading('Undoing last push…');
+    try {
+      const r = await window.electron.git.undoLastPush();
+      toast.dismiss(tid);
+      if (r.success) {
+        toast.success('Last push undone successfully');
+        try {
+          await loadGitStatus();
+          if (config) {
+            const refreshed = await loadCommits(config);
+            if (refreshed.length > 0) lastCommitShaRef.current = refreshed[0].sha;
+          }
+        } catch {}
+      } else {
+        toast.error(`Undo failed: ${r.error}`);
+      }
+    } catch (e: any) {
+      toast.dismiss(tid);
+      toast.error(`Undo failed: ${e?.message ?? 'Unexpected error'}`);
+    } finally {
+      setIsUndoingLastPush(false);
     }
   };
 
@@ -386,6 +525,8 @@ export default function App() {
           modrinthRelease={modrinthRelease}
           onPull={handlePull}
           onPush={() => setShowPush(true)}
+          onUndoLastPush={handleUndoLastPush}
+          isUndoingLastPush={isUndoingLastPush}
           onReportBug={() =>
             config &&
             window.electron.app.openExternal(`${config.github_repo.replace('.git', '')}/issues/new`)

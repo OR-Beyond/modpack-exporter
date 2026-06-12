@@ -55,6 +55,9 @@ const api = {
     push: (o: unknown) => ipcRenderer.invoke('git:push', o),
     status: () => ipcRenderer.invoke('git:status'),
     stagedFiles: () => ipcRenderer.invoke('git:staged-files'),
+    commitChanges: (sha: string) => ipcRenderer.invoke('git:commit-changes', { sha }),
+    pushPreview: () => ipcRenderer.invoke('git:push-preview'),
+    undoLastPush: () => ipcRenderer.invoke('git:undo-last-push'),
     onSyncProgress: (handler: (data: { stage: string; message: string; percent: number }) => void) => {
       ipcRenderer.removeAllListeners('sync:progress');
       ipcRenderer.on('sync:progress', (_e, data: { stage: string; message: string; percent: number }) => handler(data));
@@ -102,6 +105,8 @@ const api = {
     minimize: () => ipcRenderer.invoke('app:minimize'),
     maximize: () => ipcRenderer.invoke('app:maximize'),
     close: () => ipcRenderer.invoke('app:close'),
+    checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
+    installUpdate: (downloadUrl: string) => ipcRenderer.invoke('app:install-update', downloadUrl),
   },
 };
 

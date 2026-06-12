@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, Download, Upload, Bug, ExternalLink, ArrowUp, ArrowDown, Clock } from 'lucide-react';
+import { GitBranch, Download, Upload, Bug, ExternalLink, ArrowUp, ArrowDown, Clock, Loader2, RotateCcw } from 'lucide-react';
 import type { AppConfig, Issue, SyncStatus } from '../types';
 
 function timeAgo(iso: string): string {
@@ -28,10 +28,12 @@ interface Props {
   modrinthRelease: string | null;
   onPull: () => void;
   onPush: () => void;
+  onUndoLastPush: () => void;
+  isUndoingLastPush: boolean;
   onReportBug: () => void;
 }
 
-export default function Sidebar({ config, syncStatus, issues, lastExportTime, manifestVersion, modrinthRelease, onPull, onPush, onReportBug }: Props) {
+export default function Sidebar({ config, syncStatus, issues, lastExportTime, manifestVersion, modrinthRelease, onPull, onPush, onUndoLastPush, isUndoingLastPush, onReportBug }: Props) {
   return (
     <div
       className="flex-shrink-0 flex flex-col gap-4 overflow-y-auto p-5 border-l border-white/[0.06]"
@@ -89,26 +91,60 @@ export default function Sidebar({ config, syncStatus, issues, lastExportTime, ma
             <p className="text-[#FFA809] text-xs">{syncStatus.modified.length} uncommitted change{syncStatus.modified.length !== 1 ? 's' : ''}</p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <button
+              onClick={onPull}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-[8px] text-white text-xs font-medium transition-all"
+              style={{ background: '#20AC64' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#26c073')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#20AC64')}
+            >
+              <Download size={13} />
+              Pull latest
+            </button>
+            <button
+              onClick={onPush}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-[8px] text-white text-xs font-medium transition-all"
+              style={{ background: '#0890FE' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#1a9dff')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#0890FE')}
+            >
+              <Upload size={13} />
+              Push changes
+            </button>
+          </div>
           <button
-            onClick={onPull}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-[8px] text-white text-xs font-medium transition-all"
-            style={{ background: '#20AC64' }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#26c073')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#20AC64')}
+            onClick={onUndoLastPush}
+            disabled={isUndoingLastPush}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-[8px] text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              color: '#f85149',
+              background: 'transparent',
+              border: '1px solid rgba(248,81,73,0.35)',
+            }}
+            onMouseEnter={e => {
+              if (!isUndoingLastPush) {
+                e.currentTarget.style.background = 'rgba(248,81,73,0.08)';
+                e.currentTarget.style.borderColor = 'rgba(248,81,73,0.7)';
+              }
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'rgba(248,81,73,0.35)';
+            }}
           >
-            <Download size={13} />
-            Pull latest
-          </button>
-          <button
-            onClick={onPush}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-[8px] text-white text-xs font-medium transition-all"
-            style={{ background: '#0890FE' }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#1a9dff')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#0890FE')}
-          >
-            <Upload size={13} />
-            Push changes
+            {isUndoingLastPush ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                Undoing…
+              </>
+            ) : (
+              <>
+                <RotateCcw size={12} />
+                Undo last push
+              </>
+            )}
           </button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { CheckCircle2, ChevronDown, X } from 'lucide-react';
 import type { PullFileChange, PullModEntry, PullModUpdate } from '../types';
 
@@ -23,7 +23,6 @@ const C = {
 } as const;
 
 const COLLAPSE_LIMIT = 5;
-const AUTO_DISMISS_MS = 12_000;
 
 // ── Icon with lazy-load + placeholder ────────────────────────────────────────
 
@@ -125,13 +124,7 @@ export default function PullResultPopup({
   changedFiles,
   onDismiss,
 }: Props) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mouseDownTarget, setMouseDownTarget] = useState<EventTarget | null>(null);
-
-  useEffect(() => {
-    timerRef.current = setTimeout(onDismiss, AUTO_DISMISS_MS);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [onDismiss]);
 
   // Summary line in header
   const parts: string[] = [];
@@ -287,7 +280,7 @@ export default function PullResultPopup({
           className="flex items-center justify-between px-5 py-3 flex-shrink-0"
           style={{ borderTop: `1px solid ${C.border}` }}
         >
-          <p className="text-xs" style={{ color: C.muted }}>Auto-dismisses in 12s</p>
+          <p className="text-xs" style={{ color: C.muted }}>Click anywhere outside or press "Got it" to dismiss</p>
           <button
             onClick={onDismiss}
             className="px-4 py-1.5 rounded-[8px] text-white text-sm font-medium transition-colors"

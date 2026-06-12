@@ -1,8 +1,8 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
-import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
+import { PublisherGithub } from '@electron-forge/publisher-github';
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -12,8 +12,17 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({ name: 'orb_modpack_exporter' }),
-    new MakerZIP({}, ['darwin', 'linux']),
+    new MakerZIP({}, ['darwin', 'linux', 'win32']),
+  ],
+  publishers: [
+    new PublisherGithub({
+      repository: {
+        owner: 'OR-Beyond',
+        name: 'modpack-exporter',
+      },
+      prerelease: false,
+      draft: false,
+    }),
   ],
   plugins: [
     new AutoUnpackNativesPlugin({}),

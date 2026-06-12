@@ -7,9 +7,9 @@ export default defineConfig({
     rollupOptions: {
       external: [
         'electron',
-        'electron-store',
-        'electron-squirrel-startup',
-        'js-yaml',
+        // NOTE: js-yaml and electron-store are intentionally NOT external — they're
+        // pure JS and must be bundled into the main asar. Externalizing them caused a
+        // runtime "Cannot find module" crash in packaged builds.
         ...builtinModules,
         ...builtinModules.map(m => `node:${m}`),
       ],

@@ -34,6 +34,27 @@ export interface CommitFile {
   deletions: number;
 }
 
+export interface CommitModEntry {
+  slug: string;
+  name: string;
+  iconUrl: string | null;
+  versionNumber: string | null;
+  oldVersionNumber?: string | null;
+  status: 'added' | 'removed' | 'updated';
+}
+
+export interface CommitFileEntry {
+  path: string;
+  status: 'added' | 'modified' | 'removed';
+  parentModSlug?: string;
+  parentModName?: string;
+}
+
+export interface CommitChanges {
+  mods: CommitModEntry[];
+  otherFiles: CommitFileEntry[];
+}
+
 export interface CommitCard {
   sha: string;
   message: string;
@@ -44,6 +65,7 @@ export interface CommitCard {
   configChanged: boolean;
   files: CommitFile[];
   detailsLoaded: boolean;
+  changes?: CommitChanges;
 }
 
 export interface IssueLabel {
@@ -162,6 +184,35 @@ export interface ChangelogResult {
   note?: string;
 }
 
+export interface PushPreviewMod {
+  slug: string;
+  name: string;
+  iconUrl: string | null;
+  versionNumber: string | null;
+  projectId: string | null;
+  source: 'modrinth' | 'local';
+}
+
+export interface PushPreviewUpdate {
+  slug: string;
+  name: string;
+  iconUrl: string | null;
+  versionNumber: string | null;
+  oldVersionNumber: string | null;
+  projectId: string | null;
+}
+
+export interface PushPreviewResult {
+  success: boolean;
+  addedMods: PushPreviewMod[];
+  updatedMods: PushPreviewUpdate[];
+  removedMods: PushPreviewMod[];
+  changedFiles: { path: string; status: 'added' | 'modified' | 'removed' }[];
+  unchangedCount: number;
+  isFirstPush?: boolean;
+  error?: string;
+}
+
 export interface DeviceCodeInfo {
   user_code: string;
   verification_uri: string;
@@ -215,6 +266,9 @@ declare global {
         push: (o: { message: string }) => Promise<{ success: boolean; output?: string; error?: string }>;
         status: () => Promise<{ success: boolean; data?: SyncStatus; error?: string }>;
         stagedFiles: () => Promise<{ success: boolean; data?: string[] }>;
+        commitChanges: (sha: string) => Promise<{ success: boolean; data?: CommitChanges; error?: string }>;
+        pushPreview: () => Promise<PushPreviewResult>;
+        undoLastPush: () => Promise<{ success: boolean; message?: string; error?: string }>;
         onSyncProgress: (handler: (data: { stage: string; message: string; percent: number }) => void) => void;
         offSyncProgress: () => void;
       };
@@ -250,6 +304,8 @@ declare global {
         minimize: () => Promise<void>;
         maximize: () => Promise<void>;
         close: () => Promise<void>;
+        checkForUpdate: () => Promise<{ updateAvailable: boolean; version?: string; downloadUrl?: string; releaseNotes?: string }>;
+        installUpdate: (downloadUrl: string) => Promise<void>;
       };
     };
   }

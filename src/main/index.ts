@@ -16,11 +16,170 @@ import {
   DeviceCodeInfo,
 } from './githubAuth';
 
-// Squirrel.Windows installer events (only triggers on Windows install/update/uninstall)
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  if (require('electron-squirrel-startup')) { app.quit(); process.exit(0); }
-} catch { /* not on Windows or not running under Squirrel */ }
+// ─── Portable auto-updater (GitHub Releases) ───────────────────────────────────
+// The app ships as a portable .zip (no Squirrel installer). Updates are applied by
+// downloading the new release zip, extracting it, and swapping the install
+// directory on restart via a detached PowerShell script. The releases repo is
+// public, so no authentication is required.
+
+const UPDATE_REPO = 'OR-Beyond/modpack-exporter';
+
+interface UpdateCheckResult {
+  updateAvailable: boolean;
+  version?: string;
+  downloadUrl?: string;
+  releaseNotes?: string;
+}
+
+function githubHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  // The releases repo is public — no Authorization needed.
+  return {
+    'User-Agent': 'ORB-Modpack-Exporter',
+    ...extra,
+  };
+}
+
+/**
+ * Queries the latest GitHub release and compares its version to the running app.
+ * Returns the zip asset's download URL when an update is available. Any failure
+ * resolves to { updateAvailable: false }.
+ */
+async function checkForUpdate(): Promise<UpdateCheckResult> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: githubHeaders({ Accept: 'application/vnd.github+json' }),
+    });
+    if (!res.ok) {
+      console.warn(`[updater] release check returned HTTP ${res.status}`);
+      return { updateAvailable: false };
+    }
+
+    const release: any = await res.json();
+    const latestVersion = String(release.tag_name ?? '').replace(/^v/, '');
+    const currentVersion = app.getVersion();
+    if (!latestVersion || latestVersion === currentVersion) {
+      return { updateAvailable: false };
+    }
+
+    const zipAsset = (release.assets ?? []).find(
+      (a: any) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.zip'),
+    );
+    if (!zipAsset) {
+      console.warn('[updater] release has no .zip asset — skipping');
+      return { updateAvailable: false };
+    }
+
+    return {
+      updateAvailable: true,
+      version: latestVersion,
+      // Asset API URL, downloaded with Accept: application/octet-stream.
+      downloadUrl: zipAsset.url,
+      releaseNotes: release.body ?? '',
+    };
+  } catch (e) {
+    console.warn('[updater] check failed:', e);
+    return { updateAvailable: false };
+  }
+}
+
+/** PowerShell single-quoted string literal (doubles embedded single quotes). */
+function psQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Downloads the release zip, extracts it, then hands off to a detached PowerShell
+ * script that waits for this process to exit, copies the new files over the install
+ * directory (including resources/app.asar), restarts the app, and cleans up temp
+ * files. Quits the app immediately so the install directory is unlocked.
+ */
+async function installUpdate(downloadUrl: string): Promise<void> {
+  const tempDir = app.getPath('temp');
+  const stamp = `orb-update-${Date.now()}`;
+  const zipPath = path.join(tempDir, `${stamp}.zip`);
+  const extractDir = path.join(tempDir, `${stamp}-extracted`);
+  const scriptPath = path.join(tempDir, `${stamp}.ps1`);
+
+  // 1. Download the zip asset (octet-stream so the API asset URL streams the binary).
+  const res = await fetch(downloadUrl, {
+    headers: githubHeaders({ Accept: 'application/octet-stream' }),
+  });
+  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+  fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+
+  // 2. Extract.
+  fs.mkdirSync(extractDir, { recursive: true });
+  new AdmZip(zipPath).extractAllTo(extractDir, true);
+
+  // 3. Resolve the source root. maker-zip emits the app files at the zip root, but
+  //    guard against a single wrapping top-level folder just in case.
+  let sourceDir = extractDir;
+  const topEntries = fs.readdirSync(extractDir, { withFileTypes: true });
+  if (topEntries.length === 1 && topEntries[0].isDirectory()) {
+    sourceDir = path.join(extractDir, topEntries[0].name);
+  }
+
+  // 4. Current install directory and executable to restart.
+  const appDir = path.dirname(process.execPath);
+  const exePath = process.execPath;
+
+  // 5. Write the detached updater script.
+  const script = [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    'Start-Sleep -Seconds 2',
+    `$source = ${psQuote(sourceDir)}`,
+    `$dest = ${psQuote(appDir)}`,
+    `$exe = ${psQuote(exePath)}`,
+    // Copy the extracted files over the install dir (recursive, overwrite asar etc.)
+    'Copy-Item -Path (Join-Path $source "*") -Destination $dest -Recurse -Force',
+    // Relaunch the app from its (now-updated) location.
+    'Start-Process -FilePath $exe',
+    // Clean up temp artifacts (including this script).
+    `Remove-Item -Path ${psQuote(zipPath)} -Force`,
+    `Remove-Item -Path ${psQuote(extractDir)} -Recurse -Force`,
+    `Remove-Item -Path ${psQuote(scriptPath)} -Force`,
+    '',
+  ].join('\r\n');
+  fs.writeFileSync(scriptPath, script, 'utf-8');
+
+  // 6. Spawn the script detached and quit so the files can be replaced.
+  const child = spawn(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+    { detached: true, stdio: 'ignore' },
+  );
+  child.unref();
+
+  app.quit();
+}
+
+/**
+ * Silent launch-time update check. If an update is found, prompts the user and, on
+ * confirmation, downloads and installs it. Never throws.
+ */
+async function runLaunchUpdateCheck(): Promise<void> {
+  const result = await checkForUpdate();
+  if (!result.updateAvailable || !result.downloadUrl) return;
+
+  const currentVersion = app.getVersion();
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Update Available',
+    message: `ORB Modpack Exporter v${result.version} is available.\n\nCurrent version: v${currentVersion}`,
+    detail: result.releaseNotes?.substring(0, 500) || '',
+    buttons: ['Download & Install', 'Later'],
+    defaultId: 0,
+  });
+
+  if (response === 0) {
+    try {
+      await installUpdate(result.downloadUrl);
+    } catch (e) {
+      console.error('[updater] install failed:', e);
+      dialog.showErrorBox('Update Failed', `Could not install the update.\n\n${String(e)}`);
+    }
+  }
+}
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -463,14 +622,44 @@ function createWindow() {
   console.log('[main] window created, visible:', mainWindow.isVisible(), mainWindow.getBounds());
 }
 
-app.on('ready', () => { registerIpc(); createWindow(); runStartupScan(); });
+app.on('ready', () => {
+  registerIpc();
+  createWindow();
+  runStartupScan();
+  // Check for updates on launch (silent — only prompts if an update is found).
+  // No-ops gracefully when the network is unavailable.
+  runLaunchUpdateCheck().catch(err =>
+    console.warn('[updater] launch check failed:', err)
+  );
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
 // ─── Versions repo helpers ────────────────────────────────────────────────────
 
 const VERSIONS_REPO_URL = 'https://github.com/OR-Beyond/OR-Beyond-Versions.git';
-const OVERRIDE_FOLDERS = ['config', 'resourcepacks', 'shaderpacks', 'scripts'] as const;
+
+const OVERRIDE_FOLDERS = [
+  'config', 'resourcepacks', 'shaderpacks', 'essential',
+  'fancymenu_data', 'data', 'keybind_presets', 'configureddefaults',
+] as const;
+
+// Root-level files in the modpack that are synced into overrides/
+const INCLUDE_FILES = ['checkbox_states.json', 'emi.json'] as const;
+
+// User-specific essential/ items that must never be synced (caches, binaries, machine state)
+const ESSENTIAL_EXCLUDE = new Set([
+  'cache', 'cosmetic-cache', 'image-cache', 'screenshot-cache',
+  'screenshot-metadata', 'screenshot-checksum-caches.json',
+  'libraries', 'loader', 'lwjgl3-natives', 'version.json',
+]);
+
+// Paths (relative to overrides/) excluded from public .mrpack exports only
+const CONFIG_EXCLUDE = [
+  'config/fancymenu',
+  'config/defaultoptions',
+  'config/simpleupdatechecker_modpack.json',
+];
 
 function getVersionsRepoDir(): string {
   return path.join(app.getPath('userData'), 'versions-repo');
@@ -498,6 +687,67 @@ function walkDir(dir: string): string[] {
     else results.push(full);
   }
   return results;
+}
+
+/** True for essential/ paths that must never be synced (caches, binaries, .jar/.meta). */
+function shouldSkipEssentialFile(fwdRelPath: string): boolean {
+  const first = fwdRelPath.split('/')[0];
+  return ESSENTIAL_EXCLUDE.has(first) ||
+    fwdRelPath.endsWith('.jar') ||
+    fwdRelPath.endsWith('.meta');
+}
+
+/**
+ * Sync OVERRIDE_FOLDERS and INCLUDE_FILES from a modpack root into a versions-repo overrides/ dir.
+ * Applies ESSENTIAL_EXCLUDE filtering for the essential/ folder.
+ * Returns the number of files added, updated, or removed.
+ */
+function syncOverridesToRepo(root: string, overridesDir: string): number {
+  let count = 0;
+
+  for (const folder of OVERRIDE_FOLDERS) {
+    const srcDir = path.join(root, folder);
+    const destDir = path.join(overridesDir, folder);
+    const isEssential = folder === 'essential';
+
+    // Remove dest files that were deleted from src, or that are now excluded
+    if (fs.existsSync(destDir)) {
+      for (const destFile of walkDir(destDir)) {
+        const rel = path.relative(destDir, destFile).replace(/\\/g, '/');
+        const stale = !fs.existsSync(path.join(srcDir, rel.replace(/\//g, path.sep)));
+        if (stale || (isEssential && shouldSkipEssentialFile(rel))) {
+          try { fs.unlinkSync(destFile); count++; } catch {}
+        }
+      }
+    }
+
+    // Copy current src files into dest (skipping essential exclusions)
+    if (fs.existsSync(srcDir)) {
+      for (const srcFile of walkDir(srcDir)) {
+        const rel = path.relative(srcDir, srcFile).replace(/\\/g, '/');
+        if (isEssential && shouldSkipEssentialFile(rel)) continue;
+        const destFile = path.join(destDir, rel.replace(/\//g, path.sep));
+        fs.mkdirSync(path.dirname(destFile), { recursive: true });
+        fs.copyFileSync(srcFile, destFile);
+        count++;
+      }
+    }
+  }
+
+  // Sync root-level include_files directly into overrides/
+  fs.mkdirSync(overridesDir, { recursive: true });
+  for (const filename of INCLUDE_FILES) {
+    const srcFile = path.join(root, filename);
+    const destFile = path.join(overridesDir, filename);
+    if (fs.existsSync(srcFile)) {
+      fs.copyFileSync(srcFile, destFile);
+      count++;
+    } else if (fs.existsSync(destFile)) {
+      try { fs.unlinkSync(destFile); count++; } catch {}
+    }
+  }
+
+  return count;
 }
 
 // ── Modrinth hash cache (stored in versions repo, gitignored) ─────────────────
@@ -684,6 +934,10 @@ function registerIpc() {
   ipcMain.handle('app:minimize', () => mainWindow?.minimize());
   ipcMain.handle('app:maximize', () => { mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize(); });
   ipcMain.handle('app:close', () => mainWindow?.close());
+  ipcMain.handle('app:check-for-update', () => checkForUpdate());
+  ipcMain.handle('app:install-update', async (_e, downloadUrl: string) => {
+    await installUpdate(downloadUrl);
+  });
   ipcMain.handle('app:open-external', (_e, url: string) => shell.openExternal(url));
   ipcMain.handle('app:select-directory', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] });
@@ -936,6 +1190,12 @@ function registerIpc() {
     };
 
     try {
+      // Clear any stale index.lock left by a previous crashed git process
+      const lockPath = path.join(versionsDir, '.git', 'index.lock');
+      if (fs.existsSync(lockPath)) {
+        try { fs.unlinkSync(lockPath); console.log('[git:pull] removed stale index.lock'); } catch {}
+      }
+
       // ── Snapshot state BEFORE pulling so we can compute what changed ─────────
       const manifestPath = path.join(versionsDir, 'modrinth.index.json');
       let oldManifestFiles: any[] = [];
@@ -945,6 +1205,23 @@ function registerIpc() {
       const oldLocalJars = new Set<string>(
         fs.existsSync(modsDir) ? fs.readdirSync(modsDir).filter((f: string) => f.endsWith('.jar')) : []
       );
+
+      // ── Smart merge: identify locally-added mods ─────────────────────────────
+      // A jar present locally BEFORE this pull but absent from the last-synced
+      // manifest is un-pushed work this maintainer added. It must be preserved,
+      // not deleted as "stale". (First pull → manifest empty → every local jar is
+      // locally-added → nothing gets deleted, which is the correct behavior.)
+      const oldManifestBasenames = new Set<string>(
+        oldManifestFiles
+          .filter((f: any) => typeof f?.path === 'string' && (f.path as string).startsWith('mods/'))
+          .map((f: any) => path.basename(f.path as string))
+      );
+      const locallyAddedSlugs = new Set<string>();
+      for (const jar of oldLocalJars) {
+        if (!oldManifestBasenames.has(jar)) {
+          locallyAddedSlugs.add(path.basename(jar, '.jar'));
+        }
+      }
 
       // 1. Clone or update the versions repo
       sendProgress('git', 'Syncing versions repository…', 5);
@@ -1019,6 +1296,8 @@ function registerIpc() {
       const filesSkipped: string[] = [];
       const errors: string[] = [];
       const changedFiles: { path: string; status: 'added' | 'modified' | 'removed' }[] = [];
+      const downloadedJars = new Set<string>(); // basenames actually installed this pull
+      const deletedJars = new Set<string>();    // basenames deleted (stale, not in manifest)
 
       // 5. Sync mods from manifest
       const totalMods = manifestByBasename.size;
@@ -1044,6 +1323,7 @@ function registerIpc() {
             if (fs.existsSync(overrideJar)) {
               fs.copyFileSync(overrideJar, localPath);
               modsDownloaded++;
+              downloadedJars.add(basename);
             } else {
               modsSkipped.push(basename);
               errors.push(`Local mod missing from overrides: ${basename}`);
@@ -1080,6 +1360,7 @@ function registerIpc() {
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           fs.writeFileSync(localPath, Buffer.from(await resp.arrayBuffer()));
           modsDownloaded++;
+          downloadedJars.add(basename);
         } catch (dlErr: any) {
           modsSkipped.push(basename);
           errors.push(`Download failed for ${basename}: ${dlErr.message}`);
@@ -1088,11 +1369,20 @@ function registerIpc() {
       }
 
       // 6. Remove local jars not in the manifest
+      //    Smart merge: a stale jar that is locally-added (un-pushed work) is kept,
+      //    not deleted. Only jars that were previously synced and have since been
+      //    removed remotely are deleted here.
       sendProgress('mods', 'Removing stale mods…', 57);
+      const preservedMods: string[] = [];
       for (const localJar of localJars) {
-        if (!manifestByBasename.has(localJar)) {
-          try { fs.unlinkSync(path.join(modsDir, localJar)); modsRemoved++; } catch {}
+        if (manifestByBasename.has(localJar)) continue;
+        const slug = path.basename(localJar, '.jar');
+        if (locallyAddedSlugs.has(slug)) {
+          preservedMods.push(slug);
+          console.log(`[git:pull] preserving locally-added mod: ${localJar}`);
+          continue;
         }
+        try { fs.unlinkSync(path.join(modsDir, localJar)); modsRemoved++; deletedJars.add(localJar); } catch {}
       }
 
       // 7. Sync override files (config/, resourcepacks/, shaderpacks/, scripts/)
@@ -1158,9 +1448,12 @@ function registerIpc() {
                 filesSkipped.push(stateKey);
                 console.warn(`[pull] locally-added file skipped: ${stateKey}`);
               } else if (localHash === lastHash) {
-                fs.copyFileSync(srcFilePath, localFilePath);
-                filesUpdated++;
-                changedFiles.push({ path: stateKey, status: 'modified' });
+                // Only update if the remote file actually changed since last pull
+                if (remoteHash !== lastHash) {
+                  fs.copyFileSync(srcFilePath, localFilePath);
+                  filesUpdated++;
+                  changedFiles.push({ path: stateKey, status: 'modified' });
+                }
               } else {
                 filesSkipped.push(stateKey);
                 console.warn(`[pull] locally-modified file skipped: ${stateKey}`);
@@ -1242,6 +1535,54 @@ function registerIpc() {
         }
       }
 
+      // ── Merge locally-downloaded mods into addedMods (covers restored/missing jars) ──
+      // The manifest comparison above only detects mods new to the manifest. Jars that
+      // were already in the manifest but missing or hash-mismatched locally (and thus
+      // re-downloaded) are captured here so the popup always reflects what was installed.
+      for (const basename of downloadedJars) {
+        const entry = manifestByBasename.get(basename);
+        if (!entry) continue;
+        const slug = path.basename(entry.path as string, '.jar');
+        if (addedMods.some(m => m.slug === slug)) continue; // already captured by manifest diff
+        const sha: string = entry.hashes?.sha512 ?? '';
+        const url: string = (entry.downloads as string[] | undefined)?.[0] ?? '';
+        const parsed = parseCdnUrl(url);
+        addedMods.push({
+          slug,
+          name: getName(sha, slug),
+          projectId: parsed?.projectId ?? null,
+          iconUrl: getIconUrl(sha),
+          versionNumber: parsed?.versionNumber ?? null,
+          source: parsed ? 'modrinth' : 'local',
+        });
+      }
+
+      // ── Merge deleted stale jars into removedMods ────────────────────────────
+      // Jars deleted because they weren't in the new manifest. The manifest comparison
+      // above covers mods removed from the manifest by key; this catches any remainder.
+      for (const basename of deletedJars) {
+        const slug = path.basename(basename, '.jar');
+        if (removedMods.some(m => m.slug === slug)) continue; // already captured by manifest diff
+        let oldEntry: any = null;
+        for (const e of oldManifestFiles) {
+          if (path.basename(e.path as string) === basename) { oldEntry = e; break; }
+        }
+        const oldUrl: string = (oldEntry?.downloads as string[] | undefined)?.[0] ?? '';
+        const oldParsed = parseCdnUrl(oldUrl);
+        const oldSha: string = oldEntry?.hashes?.sha512 ?? '';
+        removedMods.push({
+          slug,
+          name: getName(oldSha, slug),
+          projectId: oldParsed?.projectId ?? null,
+          iconUrl: getIconUrl(oldSha),
+          versionNumber: oldParsed?.versionNumber ?? null,
+          source: oldParsed ? 'modrinth' : 'local',
+        });
+      }
+
+      console.log('[git:pull] addedMods:', addedMods.length, 'updatedMods:', updatedMods.length, 'removedMods:', removedMods.length, 'preservedMods:', preservedMods.length);
+      console.log('[git:pull] changedFiles:', changedFiles.length, 'filesUpdated:', filesUpdated);
+
       return {
         success: true,
         pulled: true,
@@ -1254,6 +1595,7 @@ function registerIpc() {
         addedMods,
         updatedMods,
         removedMods,
+        preservedMods,
         changedFiles,
       };
     } catch (e: any) {
@@ -1385,37 +1727,10 @@ function registerIpc() {
       };
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
-      // 9. Sync override folders (config/, resourcepacks/, shaderpacks/, scripts/)
+      // 9. Sync override folders and root-level include_files
       sendProgress('overrides', 'Syncing override files…', 58);
       const overridesDir = path.join(versionsDir, 'overrides');
-      let filesChanged = 0;
-
-      for (const folder of OVERRIDE_FOLDERS) {
-        const srcDir = path.join(root, folder);
-        const destDir = path.join(overridesDir, folder);
-
-        // Remove files from overrides/ that were deleted from the modpack
-        if (fs.existsSync(destDir)) {
-          for (const destFile of walkDir(destDir)) {
-            const relPath = path.relative(destDir, destFile);
-            if (!fs.existsSync(path.join(srcDir, relPath))) {
-              fs.unlinkSync(destFile);
-              filesChanged++;
-            }
-          }
-        }
-
-        // Copy all current files into overrides/
-        if (fs.existsSync(srcDir)) {
-          for (const srcFile of walkDir(srcDir)) {
-            const relPath = path.relative(srcDir, srcFile);
-            const destFile = path.join(destDir, relPath);
-            fs.mkdirSync(path.dirname(destFile), { recursive: true });
-            fs.copyFileSync(srcFile, destFile);
-            filesChanged++;
-          }
-        }
-      }
+      const filesChanged = syncOverridesToRepo(root, overridesDir);
 
       // 10. Ensure .gitignore excludes local cache files, then stage everything
       ensureGitignore(versionsDir);
@@ -1449,38 +1764,104 @@ function registerIpc() {
 
       // Fire-and-forget Discord notification
       void (async () => {
-        const webhookUrl = store.get('discordWebhook');
-        if (!webhookUrl) return;
+        const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1514520850542624779/sJUPZiNvGGf6VkPQ7YY5qZCcF5u2pbWXBiz_3VvT_JtwEKiZdUfNrGPGxqAFsvIsc9kq';
+        const DISCORD_ROLE_PING = '<@&1514520168729022474>';
+
+        const webhookUrl = DISCORD_WEBHOOK_URL;
+        if (!webhookUrl) return; // configured webhook missing → skip silently
+
+        // Discord field values cap at 1024 chars; keep each value safely under.
+        const clampValue = (s: string) => (s.length > 1000 ? s.slice(0, 1000) + '…' : s);
+
+        // Extract a human version number from a Modrinth CDN download URL:
+        //   https://cdn.modrinth.com/data/{projectId}/versions/{versionId}/{filename}
+        const versionFromUrl = (url: string): string | null => {
+          try {
+            const parts = url.split('/');
+            if (parts.length < 8 || parts[3] !== 'data' || parts[5] !== 'versions') return null;
+            const filename = parts[7] ?? '';
+            const m = filename.match(/(\d+\.\d+[\d.]*)/);
+            return m ? m[1] : (parts[6] || null);
+          } catch { return null; }
+        };
+
+        // Resolve display name + version for a manifest entry via the Modrinth cache.
+        const entryInfo = (entry: any): { slug: string; name: string; version: string | null } => {
+          const slug = path.basename(entry.path as string, '.jar');
+          const sha: string = entry.hashes?.sha512 ?? '';
+          const cached = sha && cache[sha] ? cache[sha] : null;
+          const url: string = Array.isArray(entry.downloads) ? (entry.downloads[0] ?? '') : '';
+          return { slug, name: cached?.title || slug, version: url ? versionFromUrl(url) : null };
+        };
+
+        // ── Compute added / updated / removed by path, detecting version bumps ──
+        const prevByPath = new Map<string, any>(prevFiles.map((f: any) => [f.path, f]));
+        const newByPath = new Map<string, any>(newFiles.map((f: any) => [f.path, f]));
+
+        const added: { name: string; version: string | null }[] = [];
+        const updated: { name: string; oldVersion: string | null; newVersion: string | null }[] = [];
+        const removed: { name: string }[] = [];
+
+        for (const [p, nf] of newByPath) {
+          const pf = prevByPath.get(p);
+          if (!pf) {
+            const info = entryInfo(nf);
+            added.push({ name: info.name, version: info.version });
+          } else if ((pf.hashes?.sha512 ?? '') !== (nf.hashes?.sha512 ?? '')) {
+            const oldInfo = entryInfo(pf);
+            const newInfo = entryInfo(nf);
+            updated.push({ name: newInfo.name, oldVersion: oldInfo.version, newVersion: newInfo.version });
+          }
+        }
+        for (const [p, pf] of prevByPath) {
+          if (!newByPath.has(p)) removed.push({ name: entryInfo(pf).name });
+        }
 
         const fields: { name: string; value: string; inline: boolean }[] = [];
 
-        const addedModNames = newFiles.filter(f => !prevPaths.has(f.path)).map(f => path.basename(f.path, '.jar'));
-        const removedModNames = prevFiles.filter((f: any) => !newPaths.has(f.path)).map((f: any) => path.basename(f.path, '.jar'));
-
-        if (addedModNames.length > 0) {
-          const list = addedModNames.slice(0, 10).map((n: string) => `\`${n}\``).join(', ');
-          fields.push({ name: '+ Mods Added', value: list + (addedModNames.length > 10 ? ` +${addedModNames.length - 10} more` : ''), inline: false });
-        }
-        if (removedModNames.length > 0) {
-          const list = removedModNames.slice(0, 10).map((n: string) => `\`${n}\``).join(', ');
-          fields.push({ name: '− Mods Removed', value: list + (removedModNames.length > 10 ? ` +${removedModNames.length - 10} more` : ''), inline: false });
+        // ✅ Added Mods
+        if (added.length > 0) {
+          const lines = added.slice(0, 15).map(m => (m.version ? `${m.name} \`${m.version}\`` : m.name));
+          if (added.length > 15) lines.push(`+${added.length - 15} more`);
+          fields.push({ name: '✅ Added Mods', value: clampValue(lines.join('\n')), inline: true });
         }
 
+        // 🔄 Updated Mods
+        if (updated.length > 0) {
+          const lines = updated.slice(0, 15).map(m => {
+            if (m.oldVersion && m.newVersion) return `${m.name} \`${m.oldVersion}\` → \`${m.newVersion}\``;
+            if (m.newVersion) return `${m.name} → \`${m.newVersion}\``;
+            return `${m.name} (version changed)`;
+          });
+          if (updated.length > 15) lines.push(`+${updated.length - 15} more`);
+          fields.push({ name: '🔄 Updated Mods', value: clampValue(lines.join('\n')), inline: true });
+        }
+
+        // ❌ Removed Mods
+        if (removed.length > 0) {
+          const lines = removed.slice(0, 15).map(m => m.name);
+          if (removed.length > 15) lines.push(`+${removed.length - 15} more`);
+          fields.push({ name: '❌ Removed Mods', value: clampValue(lines.join('\n')), inline: true });
+        }
+
+        // 📁 Changed Files (override files touched in this commit)
         try {
           const { stdout } = await runGit(['diff', '--name-only', 'HEAD~1', 'HEAD', '--', 'overrides/'], versionsDir).catch(() => ({ stdout: '' }));
           const fileList = stdout.trim().split('\n').filter(Boolean);
           if (fileList.length > 0) {
-            const list = fileList.slice(0, 10).map((f: string) => `\`${f}\``).join('\n');
-            fields.push({ name: 'Files Changed', value: list + (fileList.length > 10 ? `\n+${fileList.length - 10} more` : ''), inline: false });
+            const lines = fileList.slice(0, 8).map((f: string) => `\`${f}\``);
+            if (fileList.length > 8) lines.push(`+${fileList.length - 8} more files`);
+            fields.push({ name: '📁 Changed Files', value: clampValue(lines.join('\n')), inline: false });
           }
         } catch {}
 
         const embed = {
-          title: `${packName} — v${newVersion}`,
+          title: `Modpack Updated — v${newVersion}`,
           description: message || `Modpack push v${newVersion}`,
-          color: 0x238636,
+          color: 5814783,
+          author: { name: githubUser, icon_url: `https://github.com/${githubUser}.png` },
           fields,
-          footer: { text: `Pushed by ${githubUser}` },
+          footer: { text: 'ORB Modpack Exporter' },
           timestamp: new Date().toISOString(),
         };
 
@@ -1488,7 +1869,7 @@ function registerIpc() {
           await fetch(webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'User-Agent': 'ORB-Modpack-Exporter/1.0' },
-            body: JSON.stringify({ embeds: [embed] }),
+            body: JSON.stringify({ content: DISCORD_ROLE_PING, embeds: [embed] }),
           });
         } catch (e: any) {
           console.error('[discord] webhook send failed:', e.message);
@@ -1532,6 +1913,510 @@ function registerIpc() {
       }
     }
     return { success: true, data: result };
+  });
+
+  ipcMain.handle('git:commit-changes', async (_e, { sha }: { sha: string }) => {
+    const versionsDir = getVersionsRepoDir();
+
+    const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, '');
+
+    const parseCdnUrl = (url: string) => {
+      try {
+        const parts = url.split('/');
+        if (parts.length < 8 || parts[3] !== 'data' || parts[5] !== 'versions') return null;
+        const projectId = parts[4];
+        const versionId = parts[6];
+        const versionNumber = (parts[7] ?? '').match(/(\d+\.\d+[\d.]*)/)?.[1] ?? versionId;
+        return { projectId, versionId, versionNumber };
+      } catch { return null; }
+    };
+
+    try {
+      // 1. Get changed files for this commit
+      const { stdout: diffOut } = await runGit(['diff-tree', '--no-commit-id', '-r', sha], versionsDir);
+      const rawFiles: { status: 'added' | 'modified' | 'removed'; path: string }[] = [];
+      for (const line of diffOut.trim().split('\n').filter(Boolean)) {
+        const tabIdx = line.indexOf('\t');
+        if (tabIdx === -1) continue;
+        const meta = line.substring(0, tabIdx);
+        const filePath = line.substring(tabIdx + 1);
+        const statusLetter = meta.split(' ').pop()?.charAt(0) ?? 'M';
+        const status = statusLetter === 'A' ? 'added' : statusLetter === 'D' ? 'removed' : 'modified';
+        rawFiles.push({ status, path: filePath });
+      }
+
+      // 2. Load cache and build normalized-slug lookup
+      const cache = loadModrinthCache(versionsDir);
+      const normalizedCacheMap = new Map<string, ModrinthLookupResult>();
+      for (const entry of Object.values(cache)) {
+        if (entry.slug) normalizedCacheMap.set(normalize(entry.slug), entry);
+      }
+
+      const mods: {
+        slug: string; name: string; iconUrl: string | null;
+        versionNumber: string | null; oldVersionNumber?: string | null;
+        status: 'added' | 'removed' | 'updated';
+      }[] = [];
+      const otherFiles: {
+        path: string; status: 'added' | 'modified' | 'removed';
+        parentModSlug?: string; parentModName?: string;
+      }[] = [];
+
+      // 3. Handle modrinth.index.json diff
+      const manifestFile = rawFiles.find(f => f.path === 'modrinth.index.json');
+      if (manifestFile) {
+        let newManifest: any = null;
+        let oldManifest: any = null;
+        try {
+          const { stdout } = await runGit(['show', `${sha}:modrinth.index.json`], versionsDir);
+          newManifest = JSON.parse(stdout);
+        } catch {}
+        try {
+          const { stdout } = await runGit(['show', `${sha}^:modrinth.index.json`], versionsDir);
+          oldManifest = JSON.parse(stdout);
+        } catch {}
+
+        if (newManifest?.files && Array.isArray(newManifest.files)) {
+          const newModFiles = (newManifest.files as any[]).filter(f => (f.path as string).startsWith('mods/'));
+          const oldModFiles: any[] = oldManifest?.files
+            ? (oldManifest.files as any[]).filter(f => (f.path as string).startsWith('mods/'))
+            : [];
+
+          const newMap = new Map<string, any>();
+          const oldMap = new Map<string, any>();
+          for (const f of newModFiles) {
+            const url = (f.downloads as string[] | undefined)?.[0] ?? '';
+            const parsed = parseCdnUrl(url);
+            newMap.set(parsed?.projectId ?? path.basename(f.path as string, '.jar'), f);
+          }
+          for (const f of oldModFiles) {
+            const url = (f.downloads as string[] | undefined)?.[0] ?? '';
+            const parsed = parseCdnUrl(url);
+            oldMap.set(parsed?.projectId ?? path.basename(f.path as string, '.jar'), f);
+          }
+
+          for (const [key, f] of newMap) {
+            const sha512: string = f.hashes?.sha512 ?? '';
+            const cached = cache[sha512];
+            const url = (f.downloads as string[] | undefined)?.[0] ?? '';
+            const parsed = parseCdnUrl(url);
+            const slug = cached?.slug ?? path.basename(f.path as string, '.jar');
+            const name = cached?.title ?? slug;
+            const iconUrl = cached?.iconUrl ?? null;
+            const versionNumber = parsed?.versionNumber ?? null;
+
+            if (!oldMap.has(key)) {
+              mods.push({ slug, name, iconUrl, versionNumber, status: 'added' });
+            } else {
+              const oldF = oldMap.get(key)!;
+              const oldUrl = (oldF.downloads as string[] | undefined)?.[0] ?? '';
+              const oldParsed = parseCdnUrl(oldUrl);
+              const oldSha512: string = oldF.hashes?.sha512 ?? '';
+              const oldCached = cache[oldSha512];
+              const oldVersionNumber = oldParsed?.versionNumber ?? null;
+              const versionChanged = parsed?.versionId && oldParsed?.versionId && parsed.versionId !== oldParsed.versionId;
+              const localChanged = !parsed && !oldParsed && sha512 && oldSha512 && sha512 !== oldSha512;
+              if (versionChanged || localChanged) {
+                mods.push({ slug, name, iconUrl, versionNumber, oldVersionNumber, status: 'updated' });
+              }
+            }
+          }
+
+          for (const [key, f] of oldMap) {
+            if (!newMap.has(key)) {
+              const sha512: string = f.hashes?.sha512 ?? '';
+              const cached = cache[sha512];
+              const url = (f.downloads as string[] | undefined)?.[0] ?? '';
+              const parsed = parseCdnUrl(url);
+              const slug = cached?.slug ?? path.basename(f.path as string, '.jar');
+              mods.push({
+                slug,
+                name: cached?.title ?? slug,
+                iconUrl: cached?.iconUrl ?? null,
+                versionNumber: parsed?.versionNumber ?? null,
+                status: 'removed',
+              });
+            }
+          }
+        }
+      }
+
+      // 4. Classify remaining files
+      const addedModSlugs = new Set(mods.map(m => normalize(m.slug)));
+
+      for (const file of rawFiles) {
+        if (file.path === 'modrinth.index.json') continue;
+
+        if (file.path.startsWith('overrides/mods/') && file.path.endsWith('.jar')) {
+          const basename = path.basename(file.path, '.jar');
+          if (!addedModSlugs.has(normalize(basename))) {
+            const cachedEntry = normalizedCacheMap.get(normalize(basename));
+            mods.push({
+              slug: basename,
+              name: cachedEntry?.title ?? basename,
+              iconUrl: cachedEntry?.iconUrl ?? null,
+              versionNumber: null,
+              status: file.status === 'added' ? 'added' : file.status === 'removed' ? 'removed' : 'updated',
+            });
+            addedModSlugs.add(normalize(basename));
+          }
+          continue;
+        }
+
+        const isOverride = (
+          file.path.startsWith('overrides/config/') ||
+          file.path.startsWith('overrides/resourcepacks/') ||
+          file.path.startsWith('overrides/shaderpacks/') ||
+          file.path.startsWith('overrides/scripts/')
+        );
+
+        if (isOverride) {
+          const afterFolder = file.path.replace(/^overrides\/[^/]+\//, '');
+          const firstSegment = afterFolder.split('/')[0];
+          const normSegment = normalize(firstSegment.replace(/\.[^.]+$/, '')); // strip extension for direct files
+
+          let matchedSlug: string | null = null;
+          let matchedName: string | null = null;
+          let bestLen = 0;
+
+          for (const entry of Object.values(cache)) {
+            if (!entry.slug) continue;
+            const normSlug = normalize(entry.slug);
+            if (normSlug === normSegment) {
+              matchedSlug = entry.slug;
+              matchedName = entry.title ?? entry.slug;
+              break;
+            }
+            if ((normSegment.startsWith(normSlug) || normSlug.startsWith(normSegment)) && normSlug.length > bestLen) {
+              bestLen = normSlug.length;
+              matchedSlug = entry.slug;
+              matchedName = entry.title ?? entry.slug;
+            }
+          }
+
+          otherFiles.push({
+            path: file.path,
+            status: file.status,
+            ...(matchedSlug ? { parentModSlug: matchedSlug, parentModName: matchedName ?? matchedSlug } : {}),
+          });
+        } else {
+          otherFiles.push({ path: file.path, status: file.status });
+        }
+      }
+
+      return { success: true, data: { mods, otherFiles } };
+    } catch (e: any) {
+      return { success: false, error: e?.message ?? String(e), data: { mods: [], otherFiles: [] } };
+    }
+  });
+
+  ipcMain.handle('git:push-preview', async () => {
+    try {
+      const root = store.get('modpackRoot') || DEV_APP_ROOT;
+      const versionsDir = getVersionsRepoDir();
+      const modsDir = path.join(root, 'mods');
+
+      const parseCdnUrl = (url: string) => {
+        try {
+          const parts = url.split('/');
+          if (parts.length < 8 || parts[3] !== 'data' || parts[5] !== 'versions') return null;
+          const projectId = parts[4];
+          const versionId = parts[6];
+          const versionNumber = (parts[7] ?? '').match(/(\d+\.\d+[\d.]*)/)?.[1] ?? versionId;
+          return { projectId, versionId, versionNumber };
+        } catch { return null; }
+      };
+
+      const cache = loadModrinthCache(versionsDir);
+
+      // 1. Load manifest from versions repo
+      const manifestPath = path.join(versionsDir, 'modrinth.index.json');
+      const isFirstPush = !fs.existsSync(manifestPath);
+      let manifestFiles: any[] = [];
+      if (!isFirstPush) {
+        try {
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+          manifestFiles = manifest.files || [];
+        } catch {}
+      }
+
+      // Build manifest mod map: key = projectId or basename
+      const manifestModMap = new Map<string, any>();
+      for (const f of manifestFiles) {
+        if (!(f.path as string).startsWith('mods/')) continue;
+        const url = (f.downloads as string[] | undefined)?.[0] ?? '';
+        const parsed = parseCdnUrl(url);
+        const key = parsed?.projectId ?? path.basename(f.path as string, '.jar');
+        manifestModMap.set(key, { ...f, _parsed: parsed });
+      }
+
+      // 2. Scan local mods
+      const addedMods: any[] = [];
+      const updatedMods: any[] = [];
+      const removedMods: any[] = [];
+      let unchangedCount = 0;
+
+      if (fs.existsSync(modsDir)) {
+        const jarFiles = fs.readdirSync(modsDir).filter((f: string) => f.endsWith('.jar'));
+        const localModMap = new Map<string, { sha512: string; file: string; parsed: ReturnType<typeof parseCdnUrl> }>();
+
+        for (const jar of jarFiles) {
+          let sha512: string;
+          try { sha512 = computeSha512(path.join(modsDir, jar)); } catch { continue; }
+          const cached = cache[sha512];
+          const url = cached?.downloadUrl ?? '';
+          const parsed = parseCdnUrl(url);
+          const key = parsed?.projectId ?? path.basename(jar, '.jar');
+          localModMap.set(key, { sha512, file: jar, parsed });
+        }
+
+        for (const [key, local] of localModMap) {
+          const sha512 = local.sha512;
+          const cached = cache[sha512];
+          const parsed = local.parsed;
+          const slug = cached?.slug ?? path.basename(local.file, '.jar');
+          const name = cached?.title ?? slug;
+          const iconUrl = cached?.iconUrl ?? null;
+          const versionNumber = parsed?.versionNumber ?? null;
+          const projectId = parsed?.projectId ?? null;
+
+          if (!manifestModMap.has(key)) {
+            addedMods.push({ slug, name, iconUrl, versionNumber, projectId, source: projectId ? 'modrinth' : 'local' });
+          } else {
+            const manifestEntry = manifestModMap.get(key)!;
+            const manifestSha: string = manifestEntry.hashes?.sha512 ?? '';
+            const manifestParsed = manifestEntry._parsed;
+            const oldVersionNumber: string | null = manifestParsed?.versionNumber ?? null;
+            const versionChanged = parsed?.versionId && manifestParsed?.versionId && parsed.versionId !== manifestParsed.versionId;
+            const hashChanged = !parsed?.versionId && !manifestParsed?.versionId && sha512 && manifestSha && sha512 !== manifestSha;
+            if (versionChanged || hashChanged) {
+              updatedMods.push({ slug, name, iconUrl, versionNumber, oldVersionNumber, projectId });
+            } else {
+              unchangedCount++;
+            }
+          }
+        }
+
+        for (const [key, manifestEntry] of manifestModMap) {
+          if (!localModMap.has(key)) {
+            const sha512: string = manifestEntry.hashes?.sha512 ?? '';
+            const cached = cache[sha512];
+            const parsed = manifestEntry._parsed;
+            const slug = cached?.slug ?? path.basename(manifestEntry.path as string, '.jar');
+            removedMods.push({
+              slug,
+              name: cached?.title ?? slug,
+              iconUrl: cached?.iconUrl ?? null,
+              versionNumber: parsed?.versionNumber ?? null,
+              projectId: parsed?.projectId ?? null,
+              source: parsed ? 'modrinth' : 'local',
+            });
+          }
+        }
+      }
+
+      // 3. Detect override file changes
+      const changedFiles: { path: string; status: 'added' | 'modified' | 'removed' }[] = [];
+
+      for (const folder of OVERRIDE_FOLDERS) {
+        const srcDir = path.join(root, folder);
+        const destDir = path.join(versionsDir, 'overrides', folder);
+        const isEssential = folder === 'essential';
+
+        if (fs.existsSync(srcDir)) {
+          for (const srcFile of walkDir(srcDir)) {
+            const rel = path.relative(srcDir, srcFile).replace(/\\/g, '/');
+            if (isEssential && shouldSkipEssentialFile(rel)) continue;
+            const destFile = path.join(destDir, rel.replace(/\//g, path.sep));
+            const relFull = `${folder}/${rel}`;
+            if (!fs.existsSync(destFile)) {
+              changedFiles.push({ path: relFull, status: 'added' });
+            } else {
+              if (computeSha256(srcFile) !== computeSha256(destFile)) {
+                changedFiles.push({ path: relFull, status: 'modified' });
+              }
+            }
+          }
+        }
+
+        if (fs.existsSync(destDir)) {
+          for (const destFile of walkDir(destDir)) {
+            const rel = path.relative(destDir, destFile).replace(/\\/g, '/');
+            if (isEssential && shouldSkipEssentialFile(rel)) continue;
+            if (!fs.existsSync(path.join(srcDir, rel.replace(/\//g, path.sep)))) {
+              changedFiles.push({ path: `${folder}/${rel}`, status: 'removed' });
+            }
+          }
+        }
+      }
+
+      for (const filename of INCLUDE_FILES) {
+        const srcFile = path.join(root, filename);
+        const destFile = path.join(versionsDir, 'overrides', filename);
+        const srcExists = fs.existsSync(srcFile);
+        const destExists = fs.existsSync(destFile);
+        if (srcExists && !destExists) {
+          changedFiles.push({ path: filename, status: 'added' });
+        } else if (srcExists && destExists) {
+          if (computeSha256(srcFile) !== computeSha256(destFile)) {
+            changedFiles.push({ path: filename, status: 'modified' });
+          }
+        } else if (!srcExists && destExists) {
+          changedFiles.push({ path: filename, status: 'removed' });
+        }
+      }
+
+      return { success: true, addedMods, updatedMods, removedMods, changedFiles, unchangedCount, isFirstPush };
+    } catch (e: any) {
+      return {
+        success: false, error: e?.message ?? String(e),
+        addedMods: [], updatedMods: [], removedMods: [], changedFiles: [], unchangedCount: 0,
+      };
+    }
+  });
+
+  ipcMain.handle('git:undo-last-push', async () => {
+    const root = store.get('modpackRoot') || DEV_APP_ROOT;
+    const versionsDir = getVersionsRepoDir();
+    const token = getToken();
+    const modsDir = path.join(root, 'mods');
+
+    const sendProgress = (stage: string, msg: string, percent: number) => {
+      mainWindow?.webContents.send('sync:progress', { stage, message: msg, percent });
+    };
+
+    try {
+      // 1. Sync to latest remote state
+      sendProgress('git', 'Syncing repository…', 5);
+      await ensureVersionsRepo(versionsDir, token);
+
+      // 2. Set git identity
+      let githubUser = 'orbmodpack';
+      try {
+        const oc = getOctokit();
+        if (oc) { const { data } = await oc.users.getAuthenticated(); githubUser = data.login; }
+      } catch {}
+      await ensureGitIdentity(versionsDir, githubUser);
+
+      // 3. Verify there's a commit to revert
+      const { stdout: logOut } = await runGit(['log', '--oneline', '-1'], versionsDir);
+      if (!logOut.trim()) return { success: false, error: 'No commits to undo.' };
+
+      // 4. Revert the last commit (creates a new commit that undoes it)
+      sendProgress('git', 'Reverting last commit…', 20);
+      try {
+        await runGit(['revert', 'HEAD', '--no-edit'], versionsDir);
+      } catch (e: any) {
+        try { await runGit(['revert', '--abort'], versionsDir); } catch {}
+        return { success: false, error: 'Could not undo. Please resolve manually.' };
+      }
+
+      // 5. Push the revert commit
+      sendProgress('git', 'Pushing revert…', 40);
+      try {
+        await runGit(['push', 'origin', 'main'], versionsDir);
+      } catch {
+        await runGit(['push', '-u', 'origin', 'main'], versionsDir);
+      }
+
+      // 6. Sync local mods to match reverted manifest
+      const manifestPath = path.join(versionsDir, 'modrinth.index.json');
+      if (fs.existsSync(manifestPath)) {
+        let manifest: any = null;
+        try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); } catch {}
+
+        if (manifest && Array.isArray(manifest.files)) {
+          sendProgress('mods', 'Syncing mods…', 55);
+          fs.mkdirSync(modsDir, { recursive: true });
+          const localJars = new Set(fs.readdirSync(modsDir).filter((f: string) => f.endsWith('.jar')));
+
+          const manifestByBasename = new Map<string, any>();
+          for (const entry of manifest.files) {
+            if ((entry.path as string).startsWith('mods/')) {
+              manifestByBasename.set(path.basename(entry.path as string), entry);
+            }
+          }
+          const totalMods = Math.max(manifestByBasename.size, 1);
+          let modsDone = 0;
+
+          for (const [basename, entry] of manifestByBasename.entries()) {
+            modsDone++;
+            const percent = 55 + Math.floor((modsDone / totalMods) * 25);
+            const localPath = path.join(modsDir, basename);
+            const expectedSha512: string | undefined = entry.hashes?.sha512;
+
+            if (entry.source === 'local') {
+              const overrideJar = path.join(versionsDir, 'overrides', 'mods', basename);
+              let needsCopy = !localJars.has(basename);
+              if (!needsCopy && expectedSha512) {
+                try { needsCopy = computeSha512(localPath) !== expectedSha512; } catch { needsCopy = true; }
+              }
+              if (needsCopy && fs.existsSync(overrideJar)) fs.copyFileSync(overrideJar, localPath);
+              continue;
+            }
+
+            let needsDownload = !localJars.has(basename);
+            if (!needsDownload && expectedSha512) {
+              try { needsDownload = computeSha512(localPath) !== expectedSha512; } catch { needsDownload = true; }
+            }
+            if (needsDownload) {
+              const downloadUrl = Array.isArray(entry.downloads) ? entry.downloads[0] : null;
+              if (downloadUrl) {
+                sendProgress('mods', `Downloading ${basename}…`, percent);
+                try {
+                  const resp = await fetch(downloadUrl, { headers: { 'User-Agent': 'ORB-Modpack-Exporter/1.0' } });
+                  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                  fs.writeFileSync(localPath, Buffer.from(await resp.arrayBuffer()));
+                } catch (dlErr: any) {
+                  console.error(`[undo-push] download failed for ${basename}:`, dlErr.message);
+                }
+              }
+            }
+          }
+
+          // Remove local jars not in the reverted manifest
+          sendProgress('mods', 'Removing stale mods…', 82);
+          for (const localJar of localJars) {
+            if (!manifestByBasename.has(localJar)) {
+              try { fs.unlinkSync(path.join(modsDir, localJar)); } catch {}
+            }
+          }
+        }
+      }
+
+      // 7. Sync override files (skip essential — user-specific)
+      sendProgress('overrides', 'Syncing override files…', 87);
+      const overridesDir = path.join(versionsDir, 'overrides');
+      for (const folder of OVERRIDE_FOLDERS) {
+        if (folder === 'essential') continue;
+        const srcDir = path.join(overridesDir, folder);
+        const destDir = path.join(root, folder);
+
+        if (fs.existsSync(srcDir)) {
+          for (const srcFile of walkDir(srcDir)) {
+            const rel = path.relative(srcDir, srcFile);
+            const destFile = path.join(destDir, rel);
+            fs.mkdirSync(path.dirname(destFile), { recursive: true });
+            try { fs.copyFileSync(srcFile, destFile); } catch {}
+          }
+        }
+
+        // Remove local files that no longer exist in the reverted overrides
+        if (fs.existsSync(destDir)) {
+          for (const destFile of walkDir(destDir)) {
+            const rel = path.relative(destDir, destFile);
+            if (!fs.existsSync(path.join(srcDir, rel))) {
+              try { fs.unlinkSync(destFile); } catch {}
+            }
+          }
+        }
+      }
+
+      sendProgress('done', 'Undo complete!', 100);
+      return { success: true, message: 'Last push has been undone.' };
+    } catch (e: any) {
+      return { success: false, error: e?.message ?? String(e) };
+    }
   });
 
   // Export
@@ -1674,25 +2559,7 @@ function registerIpc() {
         );
 
         sendP('autopush', 'Syncing override files…', 13);
-        const overridesDir_auto = path.join(versionsDir, 'overrides');
-        for (const folder of OVERRIDE_FOLDERS) {
-          const srcDir = path.join(root, folder);
-          const destDir = path.join(overridesDir_auto, folder);
-          if (fs.existsSync(destDir)) {
-            for (const destFile of walkDir(destDir)) {
-              const rel = path.relative(destDir, destFile);
-              if (!fs.existsSync(path.join(srcDir, rel))) fs.unlinkSync(destFile);
-            }
-          }
-          if (fs.existsSync(srcDir)) {
-            for (const srcFile of walkDir(srcDir)) {
-              const rel = path.relative(srcDir, srcFile);
-              const dest = path.join(destDir, rel);
-              fs.mkdirSync(path.dirname(dest), { recursive: true });
-              fs.copyFileSync(srcFile, dest);
-            }
-          }
-        }
+        syncOverridesToRepo(root, path.join(versionsDir, 'overrides'));
         ensureGitignore(versionsDir);
         await runGit(['add', '-A'], versionsDir);
 
@@ -2107,12 +2974,23 @@ function registerIpc() {
 
       sendP('copying', 'Copying override files…', 50);
       const overridesDir = path.join(versionsDir, 'overrides');
+      const isExcludedFromMrpack = (rel: string) =>
+        CONFIG_EXCLUDE.some(ex => rel === ex || rel.startsWith(ex + '/'));
+
       for (const folder of OVERRIDE_FOLDERS) {
         const srcDir = path.join(overridesDir, folder);
         if (!fs.existsSync(srcDir)) continue;
         for (const file of walkDir(srcDir)) {
           const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
+          if (isExcludedFromMrpack(rel)) continue;
           zip.addFile(`overrides/${rel}`, fs.readFileSync(file));
+        }
+      }
+      // Include root-level synced files (checkbox_states.json, emi.json)
+      for (const filename of INCLUDE_FILES) {
+        const srcFile = path.join(overridesDir, filename);
+        if (fs.existsSync(srcFile)) {
+          zip.addFile(`overrides/${filename}`, fs.readFileSync(srcFile));
         }
       }
 
