@@ -51,6 +51,7 @@ const api = {
     getIssues: (o: unknown) => ipcRenderer.invoke('github:get-issues', o),
   },
   git: {
+    ensureVersionsRepo: () => ipcRenderer.invoke('git:ensure-versions-repo'),
     pull: () => ipcRenderer.invoke('git:pull'),
     push: (o: unknown) => ipcRenderer.invoke('git:push', o),
     status: () => ipcRenderer.invoke('git:status'),

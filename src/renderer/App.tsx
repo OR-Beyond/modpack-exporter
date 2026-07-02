@@ -10,6 +10,7 @@ import ExportModal from './components/ExportModal';
 import SettingsModal from './components/SettingsModal';
 import LoginModal from './components/LoginModal';
 import PullResultPopup from './components/PullResultPopup';
+import InitialSetupScreen, { InitProgress } from './components/InitialSetupScreen';
 
 import type {
   AppConfig,
@@ -24,6 +25,10 @@ import type {
 } from './types';
 
 type AuthState = 'loading' | 'unauthenticated' | 'authenticated';
+
+// First-run initialization phases. 'idle' = already set up (normal dashboard),
+// 'done' = init just finished (normal dashboard + pull popup).
+type InitState = 'idle' | 'cloning' | 'pulling' | 'done' | 'error';
 
 function parseRepoUrl(url: string): { owner: string; repo: string } | null {
   const m = url.match(/github\.com[/:]([^/]+)\/([^/.]+)(\.git)?/);
@@ -54,11 +59,17 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
-  // ── Pull result popup (manual pulls only) ─────────────────────────────────
+  // ── Pull result popup (manual pulls + first-run pull) ─────────────────────
   const [pullResult, setPullResult] = useState<PullResult | null>(null);
 
   // ── Background auto-sync state ─────────────────────────────────────────────
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+
+  // ── First-run initialization (clone versions repo + full pull) ─────────────
+  const [initState, setInitState] = useState<InitState>('idle');
+  const [initProgress, setInitProgress] = useState<InitProgress | null>(null);
+  const [initError, setInitError] = useState<string | null>(null);
+  const initInFlightRef = React.useRef(false);
 
   // ── Undo last push state ───────────────────────────────────────────────────
   const [isUndoingLastPush, setIsUndoingLastPush] = useState(false);
@@ -232,6 +243,70 @@ export default function App() {
     [enrichCommitDetails]
   );
 
+  // ── First-run initialization ───────────────────────────────────────────────
+  // Clone the versions repo, then pull the entire modpack (all mods + overrides)
+  // into the local profile. Idempotent + retryable: guarded against concurrent
+  // runs, and only marks `initialSetupComplete` after BOTH steps succeed — so a
+  // quit mid-pull simply retries on the next launch.
+  const runInitialSetup = useCallback(async () => {
+    if (initInFlightRef.current) return;
+    initInFlightRef.current = true;
+
+    setInitError(null);
+    setInitProgress(null);
+    setInitState('cloning');
+
+    try {
+      // 1. Clone / refresh the OR-Beyond-Versions repo into userData.
+      const repoRes = await window.electron.git.ensureVersionsRepo();
+      if (!repoRes.success) {
+        throw new Error(repoRes.error || 'Could not set up the versions repository.');
+      }
+
+      // 2. Pull the full modpack. Progress streams via sync:progress (see effect).
+      setInitState('pulling');
+      const pullRes = await window.electron.git.pull();
+      if (!pullRes.success) {
+        throw new Error(pullRes.error || 'Could not download the modpack.');
+      }
+
+      // Both steps succeeded — record completion so we never re-run this flow.
+      await window.electron.settings.set('initialSetupComplete', 'true');
+
+      // Refresh dashboard state. Non-fatal — the pull already succeeded, so a
+      // hiccup here must not block the completion popup.
+      try {
+        await loadGitStatus();
+        const cfgRes = await window.electron.config.read();
+        if (cfgRes.success && cfgRes.data) {
+          setConfig(cfgRes.data);
+          const refreshed = await loadCommits(cfgRes.data);
+          if (refreshed.length > 0) lastCommitShaRef.current = refreshed[0].sha;
+        }
+      } catch (e) {
+        console.warn('[initial-setup] post-pull refresh failed (dashboard will still load):', e);
+      }
+
+      setInitState('done');
+      // Always surface what was downloaded on first setup (everything is "added").
+      setPullResult(pullRes);
+      toast.success('Modpack downloaded — you’re all set!');
+    } catch (e: any) {
+      console.error('[initial-setup] failed:', e);
+      setInitError(e?.message || 'Setup failed unexpectedly.');
+      setInitState('error');
+    } finally {
+      initInFlightRef.current = false;
+    }
+  }, [loadGitStatus, loadCommits]);
+
+  // Stream pull progress into the initialization screen while it's active.
+  useEffect(() => {
+    if (initState !== 'cloning' && initState !== 'pulling') return;
+    window.electron.git.onSyncProgress(data => setInitProgress(data));
+    return () => window.electron.git.offSyncProgress();
+  }, [initState]);
+
   // ── Bootstrap on auth ──────────────────────────────────────────────────────
   const loadDashboard = useCallback(async () => {
     await loadConfig();
@@ -259,6 +334,15 @@ export default function App() {
     if (!root) {
       toast('Set your modpack root in Settings to enable git + export', { icon: '⚙️' });
       setShowSettings(true);
+      return;
+    }
+
+    // First run: the versions repo has never been cloned/pulled. Kick off the
+    // guided initialization instead of the silent auto-sync. This also covers
+    // the retry case where the user quit mid-pull on a previous launch.
+    const setupComplete = await window.electron.settings.get('initialSetupComplete');
+    if (setupComplete !== 'true') {
+      void runInitialSetup();
       return;
     }
 
@@ -298,7 +382,7 @@ export default function App() {
       }
       setIsAutoSyncing(false);
     })();
-  }, [loadConfig, loadExportState, loadCommits, loadIssues, loadGitStatus]);
+  }, [loadConfig, loadExportState, loadCommits, loadIssues, loadGitStatus, runInitialSetup]);
 
   // ── App startup ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -423,6 +507,13 @@ export default function App() {
       loadExportState(),
     ]);
     if (mrRes.version_number) setModrinthRelease(mrRes.version_number);
+
+    // If this Save completed first-time setup (root now set, repo never
+    // initialized), dismiss the overlay and start the guided clone + pull.
+    if (root) {
+      const setupComplete = await window.electron.settings.get('initialSetupComplete');
+      if (setupComplete !== 'true') void runInitialSetup();
+    }
   };
 
   const handleLoginRequest = () => setShowLogin(true);
@@ -444,6 +535,9 @@ export default function App() {
     setIssues([]);
     setSyncStatus({ branch: '', ahead: 0, behind: 0, modified: [], lastPull: null });
     setShowSettings(false);
+    setInitState('idle');
+    setInitProgress(null);
+    setInitError(null);
     toast.success('Signed out');
   };
 
@@ -500,6 +594,9 @@ export default function App() {
     );
   }
 
+  // Whether the first-run setup screen should replace the dashboard body.
+  const initActive = initState === 'cloning' || initState === 'pulling' || initState === 'error';
+
   // ── Render: authenticated dashboard ────────────────────────────────────────
   return (
     <div className="flex flex-col h-screen bg-[#1E1E1E] overflow-hidden">
@@ -509,30 +606,40 @@ export default function App() {
         onSettings={() => setShowSettings(true)}
         onLogout={handleLogout}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <ActivityFeed
-          commits={commits}
-          isLoading={isLoadingCommits}
-          hasToken={true}
-          onRefresh={handleRefreshActivity}
+
+      {initActive ? (
+        <InitialSetupScreen
+          state={initState as 'cloning' | 'pulling' | 'error'}
+          progress={initProgress}
+          error={initError}
+          onRetry={runInitialSetup}
         />
-        <Sidebar
-          config={config}
-          syncStatus={syncStatus}
-          issues={issues}
-          lastExportTime={lastExportTime}
-          manifestVersion={manifestVersion}
-          modrinthRelease={modrinthRelease}
-          onPull={handlePull}
-          onPush={() => setShowPush(true)}
-          onUndoLastPush={handleUndoLastPush}
-          isUndoingLastPush={isUndoingLastPush}
-          onReportBug={() =>
-            config &&
-            window.electron.app.openExternal(`${config.github_repo.replace('.git', '')}/issues/new`)
-          }
-        />
-      </div>
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <ActivityFeed
+            commits={commits}
+            isLoading={isLoadingCommits}
+            hasToken={true}
+            onRefresh={handleRefreshActivity}
+          />
+          <Sidebar
+            config={config}
+            syncStatus={syncStatus}
+            issues={issues}
+            lastExportTime={lastExportTime}
+            manifestVersion={manifestVersion}
+            modrinthRelease={modrinthRelease}
+            onPull={handlePull}
+            onPush={() => setShowPush(true)}
+            onUndoLastPush={handleUndoLastPush}
+            isUndoingLastPush={isUndoingLastPush}
+            onReportBug={() =>
+              config &&
+              window.electron.app.openExternal(`${config.github_repo.replace('.git', '')}/issues/new`)
+            }
+          />
+        </div>
+      )}
 
       {showPush && <PushModal onClose={() => setShowPush(false)} onSuccess={handlePushSuccess} />}
       {showExport && config && (
@@ -572,7 +679,7 @@ export default function App() {
       )}
 
       {/* Hint indicator at bottom if modpackRoot still unset */}
-      {!modpackRootSet && !showSettings && (
+      {!modpackRootSet && !showSettings && !initActive && (
         <button
           onClick={() => setShowSettings(true)}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-xs font-medium transition-colors shadow-lg z-30"

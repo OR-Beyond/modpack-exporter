@@ -262,6 +262,7 @@ declare global {
         getIssues: (o: { owner: string; repo: string }) => Promise<{ success: boolean; data?: Issue[]; error?: string }>;
       };
       git: {
+        ensureVersionsRepo: () => Promise<{ success: boolean; error?: string }>;
         pull: () => Promise<PullResult>;
         push: (o: { message: string }) => Promise<{ success: boolean; output?: string; error?: string }>;
         status: () => Promise<{ success: boolean; data?: SyncStatus; error?: string }>;
