@@ -107,9 +107,23 @@ async function installUpdate(downloadUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
   fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
 
-  // 2. Extract.
+  // 2. Extract. Done by hand (rather than AdmZip's extractAllTo) because that helper
+  //    falls back to fs.chmodSync when fs.openSync fails, and chmod isn't meaningful
+  //    on Windows — if the initial open fails (e.g. a locked/in-use file), the chmod
+  //    fallback throws ENOENT since the target was never created, masking the real
+  //    error. Writing entries out directly avoids chmod entirely and guarantees each
+  //    entry's parent directory exists before it's written.
   fs.mkdirSync(extractDir, { recursive: true });
-  new AdmZip(zipPath).extractAllTo(extractDir, true);
+  const zip = new AdmZip(zipPath);
+  for (const entry of zip.getEntries()) {
+    const entryPath = path.join(extractDir, entry.entryName);
+    if (entry.isDirectory) {
+      fs.mkdirSync(entryPath, { recursive: true });
+      continue;
+    }
+    fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+    fs.writeFileSync(entryPath, entry.getData());
+  }
 
   // 3. Resolve the source root. maker-zip emits the app files at the zip root, but
   //    guard against a single wrapping top-level folder just in case.
