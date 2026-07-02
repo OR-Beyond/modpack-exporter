@@ -946,6 +946,35 @@ function ensureGitignore(versionsDir: string): void {
 }
 
 async function ensureVersionsRepo(versionsDir: string, token: string | null): Promise<void> {
+  // 1. Verify git is actually installed. Without this check, a missing binary
+  //    surfaces deep inside runGit as a cryptic ENOENT — meaningless to the user.
+  try {
+    await runGit(['--version'], app.getPath('temp'));
+  } catch {
+    throw new Error('Git is not installed. Please install Git from https://git-scm.com/download/win');
+  }
+
+  // 2. Verify the token actually has access to the versions repo *before* attempting
+  //    a clone. Once the token is embedded in the clone URL, an auth failure comes
+  //    back as an opaque git error; a direct API check gives a much clearer signal.
+  if (token) {
+    let accessCheck: Response | null = null;
+    try {
+      accessCheck = await fetch('https://api.github.com/repos/OR-Beyond/OR-Beyond-Versions', {
+        headers: githubHeaders({
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+        }),
+      });
+    } catch {
+      // Network failure on the check itself — fall through and let the clone
+      // attempt below surface the real problem rather than guessing here.
+    }
+    if (accessCheck && (accessCheck.status === 401 || accessCheck.status === 404)) {
+      throw new Error('Your GitHub account does not have access to the modpack repository. Contact a maintainer to be added.');
+    }
+  }
+
   const repoUrlWithAuth = token
     ? `https://x-access-token:${token}@github.com/OR-Beyond/OR-Beyond-Versions.git`
     : VERSIONS_REPO_URL;
@@ -963,20 +992,17 @@ async function ensureVersionsRepo(versionsDir: string, token: string | null): Pr
   fs.mkdirSync(versionsDir, { recursive: true });
 
   if (!fs.existsSync(gitDir)) {
+    // 3. Clone. `git clone` exits 0 even against a repo with zero commits — it just
+    //    leaves an empty working tree with a warning on stderr — so a thrown error
+    //    here is always a genuine failure (auth, network, bad URL, git binary
+    //    trouble, etc.). It must surface with its real stderr, not be silently
+    //    swallowed into a fake "must be an empty repo" fallback: that fallback is
+    //    exactly what left users staring at an empty folder with no clear reason.
     try {
       await runGit(['clone', repoUrlWithAuth, '.'], versionsDir);
-    } catch {
-      // Clone failed (empty remote, non-empty dest dir, etc.) — init locally.
-      try { await runGit(['init'], versionsDir); } catch {}
-      try { await runGit(['remote', 'add', 'origin', repoUrlWithAuth], versionsDir); } catch {}
-      // If remote has any commits (e.g. just a README), pull them in.
-      try {
-        await runGit(['fetch', 'origin', 'main'], versionsDir);
-        await runGit(['reset', '--hard', 'origin/main'], versionsDir);
-      } catch {
-        // Truly empty remote — just ensure we're on the main branch.
-        try { await runGit(['checkout', '-b', 'main'], versionsDir); } catch {}
-      }
+    } catch (cloneErr: any) {
+      const detail = cloneErr?.message || String(cloneErr);
+      throw new Error(`git clone failed: ${detail}`);
     }
   } else {
     // Refresh auth token in remote URL, then pull.
@@ -996,11 +1022,12 @@ async function ensureVersionsRepo(versionsDir: string, token: string | null): Pr
     }
   }
 
-  // Belt-and-suspenders: .git exists but the working tree is somehow empty (e.g. a
-  // clone was interrupted after `.git` was written but before checkout completed).
-  // Force a fetch + hard reset to repopulate it. A genuinely fresh remote with no
-  // push yet will still have no manifest after this — that's a valid state callers
-  // already handle, and the fetch/reset failure here is swallowed accordingly.
+  // 4. Belt-and-suspenders: .git exists but the working tree is somehow empty (e.g. a
+  //    clone was interrupted after `.git` was written but before checkout completed).
+  //    Force a fetch + hard reset to repopulate it. A genuinely fresh remote with no
+  //    push yet (only a README, zero real content) will still have no manifest after
+  //    this — that IS valid, and the caller already handles a missing manifest with
+  //    its own clear message, so the fetch/reset failure here is swallowed.
   const manifestPath = path.join(versionsDir, 'modrinth.index.json');
   if (fs.existsSync(gitDir) && !fs.existsSync(manifestPath)) {
     try {
