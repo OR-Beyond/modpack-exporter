@@ -539,9 +539,20 @@ function runPython(scriptPath: string, args: string[]): Promise<string> {
   });
 }
 
+// Packaged builds ship a portable copy of Git (see forge.config.ts extraResource)
+// so the app works on machines with no system Git install. Resolved once and
+// cached — process.resourcesPath doesn't change over the app's lifetime.
+let cachedGitBinary: string | null = null;
+function getGitBinary(): string {
+  if (cachedGitBinary) return cachedGitBinary;
+  const bundled = path.join(process.resourcesPath, 'portable-git', 'cmd', 'git.exe');
+  cachedGitBinary = fs.existsSync(bundled) ? bundled : 'git';
+  return cachedGitBinary;
+}
+
 function runGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('git', args, { cwd });
+    const proc = spawn(getGitBinary(), args, { cwd });
     let out = '';
     let err = '';
     proc.stdout.on('data', (d: Buffer) => (out += d.toString()));
@@ -946,12 +957,14 @@ function ensureGitignore(versionsDir: string): void {
 }
 
 async function ensureVersionsRepo(versionsDir: string, token: string | null): Promise<void> {
-  // 1. Verify git is actually installed. Without this check, a missing binary
-  //    surfaces deep inside runGit as a cryptic ENOENT — meaningless to the user.
+  // 1. Verify a git binary is reachable. Packaged builds bundle portable Git (see
+  //    getGitBinary()), so a missing system install is no longer fatal — this is
+  //    now just an early, more legible warning than the ENOENT that would otherwise
+  //    surface deep inside runGit on a dev machine with no system Git.
   try {
     await runGit(['--version'], app.getPath('temp'));
   } catch {
-    throw new Error('Git is not installed. Please install Git from https://git-scm.com/download/win');
+    console.warn('[ensureVersionsRepo] no git binary found (system or bundled) — clone/fetch will likely fail');
   }
 
   // 2. Verify the token actually has access to the versions repo *before* attempting

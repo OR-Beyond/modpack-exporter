@@ -7,7 +7,7 @@ import { PublisherGithub } from '@electron-forge/publisher-github';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    extraResource: ['core.py', 'export_runner.py', 'sync_mods.py', 'config.yaml'],
+    extraResource: ['core.py', 'export_runner.py', 'sync_mods.py', 'config.yaml', 'portable-git'],
     executableName: 'orb-modpack-exporter',
   },
   rebuildConfig: {},
