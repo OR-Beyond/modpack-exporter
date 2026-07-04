@@ -4,11 +4,27 @@
   "version": "2.0.5",
   "description": "Collaborate via GitHub, export .mrpack files, and track changes",
   "main": ".vite/build/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OR-Beyond/modpack-exporter.git"
+  },
+  "homepage": "https://github.com/OR-Beyond/modpack-exporter#readme",
+  "bugs": {
+    "url": "https://github.com/OR-Beyond/modpack-exporter/issues"
+  },
+  "desktopName": "orb-modpack-exporter",
   "scripts": {
-    "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
-    "publish": "electron-forge publish"
+    "dev": "electron-forge start",
+    "start": "npm run dev",
+    "build:main": "vite build --config vite.main.config.ts",
+    "build:preload": "vite build --config vite.preload.config.ts",
+    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "lint": "tsc --noEmit",
+    "test": "npm run lint",
+    "package": "npm run build && electron-builder --config electron-builder.config.cjs --dir",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "release": "npm run build && electron-builder --config electron-builder.config.cjs --publish always"
   },
   "config": {
     "forge": "./forge.config.ts"
@@ -18,10 +34,8 @@
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
     "@electron-forge/core": "^7.11.2",
-    "@electron-forge/maker-zip": "^7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.4.0",
-    "@electron-forge/publisher-github": "^7.11.2",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.12.7",
     "@types/react": "^18.3.1",
@@ -29,6 +43,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
     "electron": "^42.3.0",
+    "electron-builder": "^26.0.12",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "typescript": "~5.4.5",
@@ -38,6 +53,7 @@
     "@octokit/rest": "^21.0.2",
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.17",
+    "electron-updater": "^6.6.2",
     "electron-store": "^8.2.0",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.378.0",

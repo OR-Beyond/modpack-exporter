@@ -331,7 +331,7 @@ declare global {
         maximize: () => Promise<void>;
         close: () => Promise<void>;
         checkForUpdate: () => Promise<{ updateAvailable: boolean; version?: string; downloadUrl?: string; releaseNotes?: string }>;
-        installUpdate: (downloadUrl: string) => Promise<void>;
+        installUpdate: (downloadUrl?: string) => Promise<void>;
       };
     };
   }

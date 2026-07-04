@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            builder_args: --win nsis msi portable
+          - name: Linux
+            os: ubuntu-latest
+            builder_args: --linux AppImage deb rpm pacman
+          - name: macOS
+            os: macos-latest
+            builder_args: --mac dmg zip pkg
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+      SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build installers
+        run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
+
+      - name: Upload unsigned Windows artifacts for SignPath
+        if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != '' && env.SIGNPATH_PROJECT_SLUG != '' && env.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        id: upload-unsigned-windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-installers
+          path: |
+            dist/*.exe
+            dist/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Submit Windows artifacts to SignPath
+        if: steps.upload-unsigned-windows.outputs.artifact-id != ''
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'default' }}
+          github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-dist
+          parameters: |
+            version: "${{ github.ref_name }}"
+
+      - name: Replace Windows artifacts with signed output
+        if: runner.os == 'Windows' && steps.upload-unsigned-windows.outputs.artifact-id != ''
+        shell: pwsh
+        run: |
+          if (Test-Path signed-dist) {
+            Copy-Item -Path signed-dist\* -Destination dist -Recurse -Force
+          }
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.pacman
+            dist/*.dmg
+            dist/*.zip
+            dist/*.pkg
+            dist/*.exe
+            dist/*.msi
+            dist/*.yml
+            dist/*.yaml
+            dist/*.blockmap
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ORB Modpack Exporter ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/*

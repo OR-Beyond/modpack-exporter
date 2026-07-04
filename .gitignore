@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 out/
 dist/
 .vite/
@@ -8,8 +8,6 @@ portable-git/
 filetree.txt
 test.js
 console.*
-({
-{
 gh
 
 .claude/

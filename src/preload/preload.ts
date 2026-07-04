@@ -107,7 +107,7 @@ const api = {
     maximize: () => ipcRenderer.invoke('app:maximize'),
     close: () => ipcRenderer.invoke('app:close'),
     checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
-    installUpdate: (downloadUrl: string) => ipcRenderer.invoke('app:install-update', downloadUrl),
+    installUpdate: (downloadUrl?: string) => ipcRenderer.invoke('app:install-update', downloadUrl),
   },
 };
 
