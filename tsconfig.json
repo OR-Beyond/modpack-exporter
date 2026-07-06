@@ -11,5 +11,5 @@
     "jsx": "react-jsx",
     "paths": { "@/*": ["./src/renderer/*"] }
   },
-  "include": ["src", "forge.config.ts", "vite.*.ts", "vite.*.js"]
+  "include": ["src", "vite.*.ts", "vite.*.js"]
 }

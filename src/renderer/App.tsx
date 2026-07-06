@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Minus, X } from 'lucide-react';
 
-import Header from './components/Header';
-import ActivityFeed from './components/ActivityFeed';
-import Sidebar from './components/Sidebar';
-import PushModal from './components/PushModal';
-import ExportModal from './components/ExportModal';
-import SettingsModal from './components/SettingsModal';
-import LoginModal from './components/LoginModal';
-import PullResultPopup from './components/PullResultPopup';
-import InitialSetupScreen, { InitProgress } from './components/InitialSetupScreen';
+import Header from '@/lib/components/Header';
+import ActivityFeed from '@/lib/components/ActivityFeed';
+import Sidebar from '@/lib/components/Sidebar';
+import PushModal from '@/lib/components/PushModal';
+import ExportModal from '@/lib/components/ExportModal';
+import SettingsModal from '@/lib/components/SettingsModal';
+import LoginModal from '@/lib/components/LoginModal';
+import PullResultPopup from '@/lib/components/PullResultPopup';
+import InitialSetupScreen, { InitProgress } from '@/lib/components/InitialSetupScreen';
 
 import type {
   AppConfig,
@@ -22,7 +22,7 @@ import type {
   ModChange,
   PullResult,
   SyncStatus,
-} from './types';
+} from '@/lib/types';
 
 type AuthState = 'loading' | 'unauthenticated' | 'authenticated';
 
@@ -565,8 +565,27 @@ export default function App() {
   if (authState === 'unauthenticated') {
     return (
       <div className="flex flex-col h-screen bg-[#1E1E1E] overflow-hidden">
-        {/* Empty drag region for window movement */}
-        <div className="h-14 drag-region flex items-center px-5">
+        <div
+          className="h-14 drag-region flex items-center"
+          style={{ paddingLeft: window.electron.platform === 'darwin' ? 2 : 20, paddingRight: 20 }}
+        >
+          {window.electron.platform === 'darwin' && (
+            <div className="flex items-center gap-1 pl-2 pr-3 no-drag">
+              <button
+                onClick={() => window.electron.app.close()}
+                className="w-3.5 h-3.5 rounded-full hover:brightness-75 transition-all"
+                style={{ background: '#E24729' }}
+                aria-label="Close"
+              />
+              <button
+                onClick={() => window.electron.app.minimize()}
+                className="w-3.5 h-3.5 rounded-full hover:brightness-75 transition-all"
+                style={{ background: '#FFBD2E' }}
+                aria-label="Minimize"
+              />
+              <div className="w-3.5 h-3.5 rounded-full" style={{ background: '#28C840' }} aria-hidden="true" />
+            </div>
+          )}
           <div className="flex items-center gap-3 no-drag">
             <div
               className="w-8 h-8 rounded-[10px] flex items-center justify-center text-white font-bold text-sm"
@@ -575,6 +594,29 @@ export default function App() {
               O
             </div>
             <span className="font-semibold text-white text-[15px]">ORB Modpack Exporter</span>
+          </div>
+          {window.electron.platform !== 'darwin' && (
+            <div className="flex-1" />
+          )}
+          <div className="flex items-center gap-0.5 no-drag">
+            {window.electron.platform !== 'darwin' && (
+              <>
+                <button
+                  onClick={() => window.electron.app.minimize()}
+                  className="w-8 h-8 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+                  aria-label="Minimize"
+                >
+                  <Minus size={13} className="text-[#A9A9AB]" />
+                </button>
+                <button
+                  onClick={() => window.electron.app.close()}
+                  className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#E24729] transition-colors"
+                  aria-label="Close"
+                >
+                  <X size={13} className="text-[#A9A9AB]" />
+                </button>
+              </>
+            )}
           </div>
         </div>
 

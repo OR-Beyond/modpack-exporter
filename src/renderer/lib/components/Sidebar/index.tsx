@@ -1,6 +1,6 @@
 import React from 'react';
 import { GitBranch, Download, Upload, Bug, ExternalLink, ArrowUp, ArrowDown, Clock, Loader2, RotateCcw } from 'lucide-react';
-import type { AppConfig, Issue, SyncStatus } from '../types';
+import type { AppConfig, Issue, SyncStatus } from '../../types';
 
 function timeAgo(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;

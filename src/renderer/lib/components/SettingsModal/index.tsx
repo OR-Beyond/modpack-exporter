@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, FolderOpen, Loader2, Github, Check, LogOut, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { GitHubUser } from '../types';
+import type { GitHubUser } from '../../types';
 import ProfileSelector from './ProfileSelector';
 
 interface Props {

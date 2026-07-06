@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, ChevronRight, Loader2, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { PushPreviewMod, PushPreviewResult, PushPreviewUpdate } from '../types';
+import type { PushPreviewMod, PushPreviewResult, PushPreviewUpdate } from '../../types';
 
 interface Props {
   onClose: () => void;

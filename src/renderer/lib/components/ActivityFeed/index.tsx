@@ -1,7 +1,7 @@
 import React from 'react';
 import { GitCommit, KeyRound, RefreshCw, Loader2 } from 'lucide-react';
 import ActivityCard from './ActivityCard';
-import type { CommitCard } from '../types';
+import type { CommitCard } from '../../types';
 
 interface Props {
   commits: CommitCard[];

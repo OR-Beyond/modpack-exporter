@@ -1,18 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-
 const extraResources = [
-  { from: 'core.py', to: 'core.py' },
-  { from: 'export_runner.py', to: 'export_runner.py' },
-  { from: 'sync_mods.py', to: 'sync_mods.py' },
   { from: 'config.yaml', to: 'config.yaml' },
   { from: 'build/icons/256x256.png', to: 'icon.png' },
 ];
-
-const portableGitDir = path.join(__dirname, 'portable-git');
-if (fs.existsSync(portableGitDir)) {
-  extraResources.push({ from: 'portable-git', to: 'portable-git' });
-}
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Settings, Minus, X, ChevronDown, LogOut, User, Github } from 'lucide-react';
-import type { GitHubUser } from '../types';
+import type { GitHubUser } from '../../types';
 
 interface Props {
   user: GitHubUser | null;
@@ -11,6 +11,7 @@ interface Props {
 
 export default function Header({ user, onExport, onSettings, onLogout }: Props) {
   const isWin = window.electron.platform === 'win32';
+  const isMac = window.electron.platform === 'darwin';
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -43,9 +44,33 @@ export default function Header({ user, onExport, onSettings, onLogout }: Props) 
 
   return (
     <div
-      className="flex items-center justify-between h-14 px-5 bg-[#1E1E1E] border-b border-white/[0.06] flex-shrink-0 drag-region"
-      style={{ minHeight: 56 }}
+      className="flex items-center justify-between h-14 bg-[#1E1E1E] border-b border-white/[0.06] flex-shrink-0 drag-region"
+      style={{ minHeight: 56, paddingLeft: isMac ? 2 : 20, paddingRight: 20 }}
     >
+      {isMac && (
+        <div className="flex items-center gap-1 pl-2 pr-3 no-drag">
+          <button
+            onClick={() => window.electron.app.close()}
+            className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:brightness-75 transition-all"
+            style={{ background: '#E24729' }}
+            aria-label="Close"
+            title="Close"
+          />
+          <button
+            onClick={() => window.electron.app.minimize()}
+            className="w-3.5 h-3.5 rounded-full flex items-center justify-center hover:brightness-75 transition-all"
+            style={{ background: '#FFBD2E' }}
+            aria-label="Minimize"
+            title="Minimize"
+          />
+          <div
+            className="w-3.5 h-3.5 rounded-full"
+            style={{ background: '#28C840' }}
+            aria-hidden="true"
+          />
+        </div>
+      )}
+
       {/* Left: logo + title */}
       <div className="flex items-center gap-3 no-drag">
         <div
@@ -154,8 +179,7 @@ export default function Header({ user, onExport, onSettings, onLogout }: Props) 
           Export New Version
         </button>
 
-        {/* Win32 window controls */}
-        {isWin && (
+        {!isMac && (
           <div className="flex items-center gap-0.5 ml-1">
             <button
               onClick={() => window.electron.app.minimize()}

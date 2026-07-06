@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle2, ChevronDown, X } from 'lucide-react';
-import type { PullFileChange, PullModEntry, PullModUpdate } from '../types';
+import type { PullFileChange, PullModEntry, PullModUpdate } from '../../types';
 
 interface Props {
   addedMods: PullModEntry[];

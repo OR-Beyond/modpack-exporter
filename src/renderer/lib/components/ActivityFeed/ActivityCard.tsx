@@ -3,7 +3,7 @@ import {
   Box, ChevronDown, ChevronRight, Code, ExternalLink,
   File, Image, Loader2, Settings,
 } from 'lucide-react';
-import type { CommitCard, CommitChanges, CommitFileEntry, CommitModEntry } from '../types';
+import type { CommitCard, CommitChanges, CommitFileEntry, CommitModEntry } from '../../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

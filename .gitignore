@@ -1,14 +1,8 @@
 node_modules/
-out/
 dist/
 .vite/
-portable-git/
 .env
-*.log
-filetree.txt
-test.js
-console.*
-gh
+.sisyphus/
 
 .claude/
 CLAUDE.md

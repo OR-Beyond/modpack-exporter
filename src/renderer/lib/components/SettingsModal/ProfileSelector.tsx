@@ -5,7 +5,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { LauncherProfileGroup } from '../types';
+import type { LauncherProfileGroup } from '../../types';
 
 interface Props {
   /** Currently selected modpack root path (empty string if none). */

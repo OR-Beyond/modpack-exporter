@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, ExternalLink, Github, Loader2, X, Check, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { DeviceCodeInfo } from '../types';
+import type { DeviceCodeInfo } from '../../types';
 
 interface Props {
   /** Closes the modal. If the device flow is still pending, this also aborts it. */

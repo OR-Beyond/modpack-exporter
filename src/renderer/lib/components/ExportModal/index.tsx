@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { AppConfig, ChangelogDiff, ChangelogResult } from '../types';
+import type { AppConfig, ChangelogDiff, ChangelogResult } from '../../types';
 
 interface Props {
   config: AppConfig;
