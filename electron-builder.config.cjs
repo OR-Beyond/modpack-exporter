@@ -75,7 +75,6 @@ module.exports = {
       { target: 'AppImage', arch: ['x64'] },
       { target: 'deb', arch: ['x64'] },
       { target: 'rpm', arch: ['x64'] },
-      { target: 'pacman', arch: ['x64'] },
     ],
   },
   deb: {

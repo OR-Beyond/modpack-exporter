@@ -28,7 +28,7 @@ jobs:
             builder_args: --win nsis msi portable
           - name: Linux
             os: ubuntu-latest
-            builder_args: --linux AppImage deb rpm pacman
+            builder_args: --linux AppImage deb rpm
           - name: macOS
             os: macos-latest
             builder_args: --mac dmg zip pkg
@@ -71,8 +71,6 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.rpm
-            dist/*.pkg.tar.zst
-            dist/*.pacman
             dist/*.dmg
             dist/*.zip
             dist/*.pkg
