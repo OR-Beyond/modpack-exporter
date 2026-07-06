@@ -3,17 +3,22 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -30,15 +35,12 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-      SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
-      SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -61,41 +63,6 @@ jobs:
       - name: Build installers
         run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
 
-      - name: Upload unsigned Windows artifacts for SignPath
-        if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != '' && env.SIGNPATH_PROJECT_SLUG != '' && env.SIGNPATH_SIGNING_POLICY_SLUG != ''
-        id: upload-unsigned-windows
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-windows-installers
-          path: |
-            dist/*.exe
-            dist/*.msi
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Submit Windows artifacts to SignPath
-        if: steps.upload-unsigned-windows.outputs.artifact-id != ''
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'default' }}
-          github-artifact-id: ${{ steps.upload-unsigned-windows.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed-dist
-          parameters: |
-            version: "${{ github.ref_name }}"
-
-      - name: Replace Windows artifacts with signed output
-        if: runner.os == 'Windows' && steps.upload-unsigned-windows.outputs.artifact-id != ''
-        shell: pwsh
-        run: |
-          if (Test-Path signed-dist) {
-            Copy-Item -Path signed-dist\* -Destination dist -Recurse -Force
-          }
-
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -115,6 +82,7 @@ jobs:
             dist/*.yaml
             dist/*.blockmap
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     name: Publish GitHub Release
