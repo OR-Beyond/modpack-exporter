@@ -86,14 +86,14 @@ module.exports = {
     target: [
       { target: 'AppImage', arch: ['x64', 'arm64'] },
     ],
-  },
-  appImage: {
-    artifactName: '${productName}-${version}-linux-x86_64.AppImage',
-    synopsis: 'ORB Modpack Exporter',
-    description: 'Minecraft modpack collaboration tool',
-    category: 'Utility',
-    // Update identifier for AppImageLauncher / Shelly (CachyOS)
-    // This enables launcher-managed updates and integration
-    updateInfo: true,
+    appImage: {
+      artifactName: '${productName}-${version}-linux-x86_64.AppImage',
+      synopsis: 'ORB Modpack Exporter',
+      description: 'Minecraft modpack collaboration tool',
+      category: 'Utility',
+      // Update identifier for AppImageLauncher / Shelly (CachyOS)
+      // This enables launcher-managed updates and integration
+      updateInfo: true,
+    },
   },
 };
