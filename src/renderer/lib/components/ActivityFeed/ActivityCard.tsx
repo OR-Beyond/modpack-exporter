@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Box, ChevronDown, ChevronRight, Code, ExternalLink,
   File, Image, Loader2, Settings,
@@ -47,13 +47,14 @@ function ModIcon({ iconUrl, name }: { iconUrl: string | null; name: string }) {
 }
 
 // 24×24 icon for the collapsed summary row
-function SmallModIcon({ mod }: { mod: CommitModEntry }) {
+function SmallModIcon({ mod, iconUrl: overrideIcon }: { mod: CommitModEntry; iconUrl?: string | null }) {
   const [failed, setFailed] = useState(false);
+  const iconUrl = overrideIcon ?? mod.iconUrl;
   const ringColor = mod.status === 'added' ? '#3fb95066'
     : mod.status === 'removed' ? '#f8514966'
     : '#d2991d66';
 
-  if (!mod.iconUrl || failed) {
+  if (!iconUrl || failed) {
     return (
       <div
         title={mod.name}
@@ -66,7 +67,7 @@ function SmallModIcon({ mod }: { mod: CommitModEntry }) {
   }
   return (
     <img
-      src={mod.iconUrl}
+      src={iconUrl}
       alt={mod.name}
       title={mod.name}
       style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0, border: `2px solid ${ringColor}` }}
@@ -154,8 +155,10 @@ export default function ActivityCard({ commit }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [localChanges, setLocalChanges] = useState<CommitChanges | null>(null);
+  const [modIcons, setModIcons] = useState<Record<string, string | null>>({});
   const [fetchLoading, setFetchLoading] = useState(false);
   const fetchAttempted = useRef(false);
+  const iconsFetched = useRef(false);
 
   const changes: CommitChanges | null = commit.changes ?? localChanges;
   const isLoaded = commit.detailsLoaded || localChanges !== null;
@@ -172,11 +175,12 @@ export default function ActivityCard({ commit }: Props) {
         window.electron.github.getCommitFiles({ ...parsed, sha: commit.sha }),
       ]);
 
+      let changes: CommitChanges | null = null;
       if (changesRes.success && changesRes.data &&
           (changesRes.data.mods.length > 0 || changesRes.data.otherFiles.length > 0)) {
-        setLocalChanges(changesRes.data);
+        changes = changesRes.data;
       } else if (filesRes.success && filesRes.data) {
-        setLocalChanges({
+        changes = {
           mods: filesRes.data.modChanges.map(mc => ({
             slug: mc.name.toLowerCase().replace(/\s+/g, '-'),
             name: mc.name,
@@ -188,15 +192,36 @@ export default function ActivityCard({ commit }: Props) {
             path: f.path,
             status: f.status as 'added' | 'modified' | 'removed',
           })),
-        });
+        };
       } else {
-        setLocalChanges({ mods: [], otherFiles: [] });
+        changes = { mods: [], otherFiles: [] };
+      }
+
+      setLocalChanges(changes);
+
+      if (changes.mods.length > 0) {
+        const slugs = changes.mods.map(m => m.slug).filter(Boolean);
+        try {
+          const icons = await window.electron.modrinth.getIcons(slugs);
+          setModIcons(prev => ({ ...prev, ...icons }));
+        } catch {}
       }
     } catch {
       setLocalChanges({ mods: [], otherFiles: [] });
     }
     setFetchLoading(false);
   };
+
+  // Fetch mod icons when commit data is pre-loaded from parent
+  useEffect(() => {
+    if (!iconsFetched.current && commit.changes?.mods.length) {
+      iconsFetched.current = true;
+      const slugs = commit.changes.mods.map(m => m.slug).filter(Boolean);
+      window.electron.modrinth.getIcons(slugs).then(icons => {
+        setModIcons(prev => ({ ...prev, ...icons }));
+      }).catch(() => {});
+    }
+  }, [commit.changes]);
 
   const handleCardClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-noclick]')) return;
@@ -290,7 +315,7 @@ export default function ActivityCard({ commit }: Props) {
               <div className="flex items-center gap-2 flex-wrap">
                 {shownIcons.length > 0 && (
                   <div className="flex items-center gap-1">
-                    {shownIcons.map((mod, i) => <SmallModIcon key={i} mod={mod} />)}
+                    {shownIcons.map((mod, i) => <SmallModIcon key={i} mod={mod} iconUrl={modIcons[mod.slug]} />)}
                     {overflowCount > 0 && (
                       <div
                         className="flex items-center justify-center flex-shrink-0 font-medium"
@@ -378,7 +403,7 @@ export default function ActivityCard({ commit }: Props) {
                             style={{ cursor: hasConfigs ? 'pointer' : 'default' }}
                             onClick={e => hasConfigs && toggleMod(mod.slug, e)}
                           >
-                            <ModIcon iconUrl={mod.iconUrl} name={mod.name} />
+                            <ModIcon iconUrl={modIcons[mod.slug] ?? mod.iconUrl} name={mod.name} />
                             <span className="text-sm font-medium text-white flex-1 min-w-0 truncate">
                               {mod.name}
                             </span>

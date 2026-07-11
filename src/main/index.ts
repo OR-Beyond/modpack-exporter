@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import os from 'os';
 import AdmZip from 'adm-zip';
 import yaml from 'js-yaml';
 import { autoUpdater } from 'electron-updater';
@@ -18,6 +19,21 @@ import {
   DeviceCodeInfo,
 } from './githubAuth';
 import { syncMods } from './sync-mods';
+import {
+  loadVersionHistory,
+  appendVersionRecord,
+  validateManifest,
+} from './versions';
+import {
+  takeSnapshot,
+  listSnapshots,
+  restoreSnapshot,
+  getProfileMode,
+  setProfileMode,
+  promoteToProduction,
+  productionWorkspacePath,
+  type ProfileMode,
+} from './profile';
 
 const gitProvider = new IsomorphicGitProvider();
 
@@ -166,9 +182,16 @@ const LAUNCHER_SUBPATHS = [
 
 // Lower-cased for case-insensitive matching on Windows
 const SKIP_DIRS_LOWER = new Set([
+  // Windows
   'windows', 'program files', 'program files (x86)', 'programdata',
   '$recycle.bin', 'system volume information', 'intel', 'drivers',
   'perflogs', 'msocache', 'recovery', 'boot', 'temp', 'tmp', 'cache',
+  // macOS
+  'library', 'system', 'cores', 'dev', 'private', 'var', 'volumes',
+  'network', 'applications', 'applications (parallels)',
+  // Linux
+  'etc', 'proc', 'sys', 'snap', 'flatpak', 'run', 'sbin', 'bin',
+  'lib', 'lib32', 'lib64', 'opt', 'srv', 'root', 'lost+found',
 ]);
 
 function shouldSkipDir(name: string): boolean {
@@ -197,18 +220,50 @@ async function isValidModpackRootAsync(dir: string): Promise<boolean> {
   return true;
 }
 
-// ── Fast %APPDATA% scan ─────────────────────────────────────────────────────
+/**
+ * Returns known OS-specific config/home directories for launcher profile scanning.
+ * Falls back from platform-specific env vars to os.homedir() for cross-platform support.
+ */
+function getPlatformBaseDirs(): string[] {
+  const dirs: string[] = [];
+
+  // Windows: %APPDATA% + %USERPROFILE%
+  if (process.env.APPDATA) dirs.push(process.env.APPDATA);
+  if (process.env.USERPROFILE) dirs.push(process.env.USERPROFILE);
+
+  // macOS: ~/Library/Application Support
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    dirs.push(path.join(home, 'Library', 'Application Support'));
+  }
+
+  // Linux: ~/.local/share + ~/.config
+  if (process.platform === 'linux') {
+    for (const envVar of ['XDG_DATA_HOME', 'XDG_CONFIG_HOME']) {
+      const val = process.env[envVar];
+      if (val) dirs.push(val);
+    }
+    dirs.push(path.join(home, '.local', 'share'));
+    dirs.push(path.join(home, '.config'));
+  }
+
+  return dirs;
+}
+
+// ── Fast scan ───────────────────────────────────────────────────────────────
 
 function detectModpackRoot(): string | null {
-  const appData = process.env.APPDATA;
-  if (!appData) return null;
+  const baseDirs = getPlatformBaseDirs();
 
-  const searchRoots = [
-    path.join(appData, 'ModrinthApp', 'profiles'),
-    path.join(appData, 'PrismLauncher', 'instances'),
-    path.join(appData, 'MultiMC', 'instances'),
-    path.join(appData, 'curseforge', 'minecraft', 'Instances'),
-  ];
+  const searchRoots: string[] = [];
+  for (const base of baseDirs) {
+    searchRoots.push(
+      path.join(base, 'ModrinthApp', 'profiles'),
+      path.join(base, 'PrismLauncher', 'instances'),
+      path.join(base, 'MultiMC', 'instances'),
+      path.join(base, 'curseforge', 'minecraft', 'Instances'),
+    );
+  }
 
   for (const searchRoot of searchRoots) {
     if (!fs.existsSync(searchRoot)) continue;
@@ -481,37 +536,61 @@ function scanInstancesDir(instancesDir: string, def: LauncherDef): LauncherProfi
   return results;
 }
 
+const LAUNCHER_PATHS_BY_OS: Record<string, Record<string, string[]>> = {
+  win32: {
+    modrinth: ['%APPDATA%/ModrinthApp', '%APPDATA%/ModrinthApp'],
+    prism: ['%APPDATA%/PrismLauncher'],
+    multimc: ['%APPDATA%/MultiMC'],
+    atlauncher: ['%APPDATA%/ATLauncher'],
+    curseforge: ['%USERPROFILE%/curseforge/minecraft/Instances', '%APPDATA%/CurseForge/minecraft/Instances'],
+    gdlauncher: ['%APPDATA%/gdlauncher_next', '%APPDATA%/gdlauncher'],
+  },
+  darwin: {
+    modrinth: ['~/Library/Application Support/ModrinthApp'],
+    prism: ['~/Library/Application Support/prismlauncher'],
+    multimc: ['~/Library/Application Support/multimc'],
+    atlauncher: ['~/Library/Application Support/ATLauncher'],
+    curseforge: [],     // no macOS launcher
+    gdlauncher: [],     // no macOS launcher
+  },
+  linux: {
+    modrinth: ['~/.local/share/modrinth-app', '~/.config/modrinth-app'],
+    prism: ['~/.local/share/PrismLauncher', '~/.config/PrismLauncher'],
+    multimc: ['~/.local/share/multimc', '~/.config/multimc'],
+    atlauncher: ['~/.local/share/ATLauncher', '~/.config/ATLauncher'],
+    curseforge: [],     // no Linux launcher
+    gdlauncher: [],     // no Linux launcher
+  },
+};
+
+function resolveLauncherPath(template: string): string {
+  const home = os.homedir();
+  return template
+    .replace('%APPDATA%', process.env.APPDATA ?? '')
+    .replace('%USERPROFILE%', process.env.USERPROFILE ?? home)
+    .replace('~', home);
+}
+
 /** A launcher's fixed, well-known base directories (parent of its instances/profiles subdir). */
 function getKnownBaseDirs(def: LauncherDef): string[] {
-  const appData = process.env.APPDATA;
-  const userProfile = process.env.USERPROFILE;
   const bases: string[] = [];
 
-  switch (def.id) {
-    case 'modrinth': {
-      if (appData) bases.push(path.join(appData, 'ModrinthApp'));
-      const customModrinthPath = store.get('modrinthPath');
-      if (customModrinthPath) bases.push(customModrinthPath);
-      break;
+  // Platform-specific known paths
+  const platform = process.platform as keyof typeof LAUNCHER_PATHS_BY_OS;
+  const pathsForPlatform = LAUNCHER_PATHS_BY_OS[platform];
+  if (pathsForPlatform) {
+    for (const template of (pathsForPlatform[def.id] ?? [])) {
+      const resolved = resolveLauncherPath(template);
+      if (resolved && fs.existsSync(resolved)) bases.push(resolved);
     }
-    case 'prism':
-      if (appData) bases.push(path.join(appData, 'PrismLauncher'));
-      break;
-    case 'multimc':
-      if (appData) bases.push(path.join(appData, 'MultiMC'));
-      break;
-    case 'atlauncher':
-      if (appData) bases.push(path.join(appData, 'ATLauncher'));
-      break;
-    case 'curseforge':
-      if (userProfile) bases.push(path.join(userProfile, 'curseforge', 'minecraft', 'Instances'));
-      if (appData) bases.push(path.join(appData, 'CurseForge', 'minecraft', 'Instances'));
-      break;
-    case 'gdlauncher':
-      if (appData) bases.push(path.join(appData, 'gdlauncher_next'));
-      if (appData) bases.push(path.join(appData, 'gdlauncher'));
-      break;
   }
+
+  // Custom override path
+  if (def.id === 'modrinth') {
+    const customModrinthPath = store.get('modrinthPath');
+    if (customModrinthPath) bases.push(customModrinthPath);
+  }
+
   return bases;
 }
 
@@ -1188,6 +1267,11 @@ function registerIpc() {
     }
   });
 
+  ipcMain.handle('settings:get-read-only', () => store.get('readOnlyMode'));
+  ipcMain.handle('settings:set-read-only', (_e, { enabled }: { enabled: boolean }) => {
+    store.set('readOnlyMode', enabled);
+  });
+
   // Config
   ipcMain.handle('config:read', () => {
     try {
@@ -1371,8 +1455,16 @@ function registerIpc() {
   });
 
   ipcMain.handle('git:pull', async () => {
+    if (store.get('readOnlyMode')) {
+      return { success: false, error: 'Cannot pull while read-only mode is enabled. Disable it in Settings first.' };
+    }
+
     const root = store.get('modpackRoot');
     if (!root) return { success: false, error: 'No modpack root configured' };
+
+    const userDataPath = app.getPath('userData');
+    const pullMode = getProfileMode(userDataPath);
+    takeSnapshot(userDataPath, root, pullMode);
 
     const versionsDir = getVersionsRepoDir();
     const modsDir = path.join(root, 'mods');
@@ -1450,6 +1542,11 @@ function registerIpc() {
       }
       if (!Array.isArray(manifest?.files)) {
         return { success: false, error: 'Manifest is missing "files" array. Aborting to protect local files.' };
+      }
+
+      const validation = validateManifest(manifest);
+      if (!validation.valid) {
+        return { success: false, error: `Manifest validation failed: ${validation.errors.join('; ')}` };
       }
 
       // 3. Load last pull state for local-change detection on override files
@@ -1871,8 +1968,16 @@ function registerIpc() {
   });
 
   ipcMain.handle('git:push', async (_e, { message }: { message: string }) => {
+    if (store.get('readOnlyMode')) {
+      return { success: false, error: 'Cannot push while read-only mode is enabled. Disable it in Settings first.' };
+    }
+
     const root = store.get('modpackRoot');
     if (!root) return { success: false, error: 'No modpack root configured' };
+
+    const userDataPath = app.getPath('userData');
+    const pushMode = getProfileMode(userDataPath);
+    takeSnapshot(userDataPath, root, pushMode);
 
     const modsDir = path.join(root, 'mods');
     if (!fs.existsSync(modsDir)) {
@@ -2036,6 +2141,12 @@ function registerIpc() {
         name: packName,
         files: newFiles,
       };
+
+      const pushValidation = validateManifest(manifest);
+      if (!pushValidation.valid) {
+        return { success: false, error: `Manifest validation failed: ${pushValidation.errors.join('; ')}` };
+      }
+
       fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
 
       // 9. Sync override folders and root-level include_files
@@ -2831,7 +2942,10 @@ function registerIpc() {
   ipcMain.handle('export:run', async (_e, opts: {
     version: string; isLite: boolean; isRelease: boolean; packName: string; exportDir?: string;
   }) => {
-    const root = store.get('modpackRoot') || DEV_APP_ROOT;
+    const profileMode = getProfileMode(app.getPath('userData'));
+    const root = profileMode === 'prod'
+      ? productionWorkspacePath(app.getPath('userData'))
+      : store.get('modpackRoot') || DEV_APP_ROOT;
     const configPath = getConfigPath();
     const exportDir = opts.exportDir || store.get('exportDir') || path.join(root, 'Modpack Export');
     try {
@@ -3298,7 +3412,10 @@ function registerIpc() {
     overwriteSnapshot?: boolean;
   }) => {
     const versionsDir = getVersionsRepoDir();
-    const root = store.get('modpackRoot');
+    const profileMode = getProfileMode(app.getPath('userData'));
+    const root = profileMode === 'prod'
+      ? productionWorkspacePath(app.getPath('userData'))
+      : store.get('modpackRoot');
     const sendP = (stage: string, message: string, percent: number) =>
       mainWindow?.webContents.send('export:progress', { stage, message, percent });
 
@@ -3445,6 +3562,217 @@ function registerIpc() {
       const result = await syncMods(root, null, false);
       return { success: true, data: result };
     } catch (e: any) { return { success: false, error: e.message }; }
+  });
+
+  // Modrinth icon cache
+  ipcMain.handle('modrinth:get-icons', async (_e, slugs: string[]) => {
+    const cacheDir = path.join(app.getPath('userData'), 'cache', 'mod-icons');
+    await fs.promises.mkdir(cacheDir, { recursive: true });
+
+    const results: Record<string, string | null> = {};
+    const UA = { 'User-Agent': 'ORB-Modpack-Exporter/1.0' };
+
+    for (const slug of slugs) {
+      if (results[slug] !== undefined) continue;
+      try {
+        const cachedPath = path.join(cacheDir, `${slug}.png`);
+        if (fs.existsSync(cachedPath)) {
+          const data = fs.readFileSync(cachedPath);
+          results[slug] = `data:image/png;base64,${data.toString('base64')}`;
+          continue;
+        }
+
+        const res = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(slug)}`, {
+          headers: UA, signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) { results[slug] = null; continue; }
+
+        const project: any = await res.json();
+        const iconUrl: string | undefined = project.icon_url;
+        if (!iconUrl) { results[slug] = null; continue; }
+
+        const iconRes = await fetch(iconUrl, { signal: AbortSignal.timeout(5000) });
+        if (!iconRes.ok) { results[slug] = null; continue; }
+
+        const buf = Buffer.from(await iconRes.arrayBuffer());
+        fs.writeFileSync(cachedPath, buf);
+        results[slug] = `data:image/png;base64,${buf.toString('base64')}`;
+      } catch {
+        results[slug] = null;
+      }
+    }
+
+    return results;
+  });
+
+  // ── Version history ──────────────────────────────────────────────────────────
+  ipcMain.handle('versions:list', async () => {
+    const versionsDir = getVersionsRepoDir();
+    try {
+      const data = loadVersionHistory(versionsDir);
+      return { success: true, data };
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  ipcMain.handle('versions:rollback', async (_e, { versionId }: { versionId: string }) => {
+    const versionsDir = getVersionsRepoDir();
+    try {
+      const history = loadVersionHistory(versionsDir);
+      const target = history.find(v => v.id === versionId);
+      if (!target) return { success: false, error: 'Version not found' };
+
+      await gitProvider.fetch(versionsDir, { ...makeGitAuth() });
+
+      const changedFiles = await gitProvider.diffRefs(versionsDir, target.commitSha, 'HEAD');
+
+      for (const filepath of changedFiles) {
+        const fullPath = path.join(versionsDir, filepath);
+        try {
+          const blob = await gitProvider.readBlob(versionsDir, target.commitSha, filepath);
+          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+          fs.writeFileSync(fullPath, Buffer.from(blob));
+        } catch {
+          if (fs.existsSync(fullPath)) {
+            fs.rmSync(fullPath, { force: true });
+          }
+        }
+      }
+
+      await gitProvider.addAll(versionsDir);
+      const revertOid = await gitProvider.commit(
+        versionsDir,
+        `Rollback to version ${target.manifestVersion}`,
+      );
+      await gitProvider.push(versionsDir, { ...makeGitAuth() });
+
+      await gitProvider.fetch(versionsDir, { ...makeGitAuth() });
+      await gitProvider.resetHard(versionsDir, 'origin/main');
+
+      return {
+        success: true,
+        message: `Rolled back to version ${target.manifestVersion} (${revertOid.substring(0, 7)})`,
+      };
+    } catch (e: any) {
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
+  ipcMain.handle('versions:current', async () => {
+    try {
+      const versionsDir = getVersionsRepoDir();
+      const history = loadVersionHistory(versionsDir);
+      const latest = history[history.length - 1];
+      return { success: true, manifestVersion: latest?.manifestVersion ?? null };
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  // ── Profile protection ───────────────────────────────────────────────────────
+  ipcMain.handle('profile:get-mode', () => {
+    return getProfileMode(app.getPath('userData'));
+  });
+
+  ipcMain.handle('profile:set-mode', async (_e, { mode }: { mode: string }) => {
+    setProfileMode(app.getPath('userData'), mode as ProfileMode);
+  });
+
+  ipcMain.handle('profile:snapshot', async () => {
+    const root = store.get('modpackRoot');
+    if (!root) return { success: false, error: 'Modpack root not set' };
+    const mode = getProfileMode(app.getPath('userData'));
+    try {
+      const record = takeSnapshot(app.getPath('userData'), root, mode);
+      return { success: true, data: { id: record.id, timestamp: record.timestamp, mode: record.mode, modCount: record.modCount, fileCount: record.fileCount } };
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  ipcMain.handle('profile:list-snapshots', () => {
+    try {
+      const records = listSnapshots(app.getPath('userData'));
+      return { success: true, data: records };
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  ipcMain.handle('profile:restore', async (_e, { snapshotId }: { snapshotId: string }) => {
+    const root = store.get('modpackRoot');
+    if (!root) return { success: false, error: 'Modpack root not set' };
+    try {
+      return restoreSnapshot(app.getPath('userData'), snapshotId, root);
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  ipcMain.handle('profile:promote', async () => {
+    const root = store.get('modpackRoot');
+    if (!root) return { success: false, error: 'Modpack root not set' };
+    try {
+      const result = promoteToProduction(app.getPath('userData'), root);
+      return result;
+    } catch (e: any) {
+      return { success: false, error: e?.message };
+    }
+  });
+
+  ipcMain.handle('profile:promote-preview', async () => {
+    const root = store.get('modpackRoot');
+    if (!root) return { success: false, error: 'Modpack root not set' };
+
+    const prodDir = productionWorkspacePath(app.getPath('userData'));
+
+    interface DiffEntry {
+      type: 'added' | 'removed' | 'changed';
+      path: string;
+      devSize?: number;
+      prodSize?: number;
+    }
+
+    const devFiles = new Map<string, { size: number; mtime: number }>();
+    const prodFiles = new Map<string, { size: number; mtime: number }>();
+
+    for (const fp of walkDir(root)) {
+      const rel = path.relative(root, fp).replace(/\\/g, '/');
+      if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
+      try {
+        const st = fs.statSync(fp);
+        devFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
+      } catch {}
+    }
+
+    for (const fp of walkDir(prodDir)) {
+      const rel = path.relative(prodDir, fp).replace(/\\/g, '/');
+      if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
+      try {
+        const st = fs.statSync(fp);
+        prodFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
+      } catch {}
+    }
+
+    const diff: DiffEntry[] = [];
+
+    for (const [rel, devInfo] of devFiles) {
+      const prodInfo = prodFiles.get(rel);
+      if (!prodInfo) {
+        diff.push({ type: 'added', path: rel, devSize: devInfo.size });
+      } else if (devInfo.size !== prodInfo.size || devInfo.mtime !== prodInfo.mtime) {
+        diff.push({ type: 'changed', path: rel, devSize: devInfo.size, prodSize: prodInfo.size });
+      }
+    }
+
+    for (const [rel, prodInfo] of prodFiles) {
+      if (!devFiles.has(rel)) {
+        diff.push({ type: 'removed', path: rel, prodSize: prodInfo.size });
+      }
+    }
+
+    return { success: true, data: diff };
   });
 }
 

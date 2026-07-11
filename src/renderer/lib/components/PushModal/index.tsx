@@ -8,7 +8,7 @@ interface Props {
   onSuccess: () => void;
 }
 
-type Phase = 'idle' | 'pushing' | 'success' | 'error';
+type Phase = 'idle' | 'confirming' | 'pushing' | 'success' | 'error';
 
 interface ProgressState {
   percent: number;
@@ -176,8 +176,12 @@ export default function PushModal({ onClose, onSuccess }: Props) {
     return () => clearInterval(interval);
   }, [phase, onSuccess]);
 
-  const handlePush = async () => {
+  const handleRequestPush = () => {
     if (!commitMessage.trim()) { toast.error('Commit message required'); return; }
+    setPhase('confirming');
+  };
+
+  const handleConfirmPush = async () => {
     setError(null);
     setProgress({ percent: 0, message: 'Starting…', stage: '' });
     setPhase('pushing');
@@ -344,7 +348,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
       style={{ background: 'rgba(0,0,0,0.75)' }}
       onMouseDown={e => setMouseDownTarget(e.target)}
       onMouseUp={e => {
-        if (mouseDownTarget === e.target && e.target === e.currentTarget && !isPushing) onClose();
+        if (mouseDownTarget === e.target && e.target === e.currentTarget && phase === 'idle') onClose();
         setMouseDownTarget(null);
       }}
     >
@@ -408,7 +412,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
                 onFocus={e => (e.currentTarget.style.borderColor = COLORS.accent)}
                 onBlur={e => (e.currentTarget.style.borderColor =
                   phase === 'error' ? 'rgba(248,81,73,0.35)' : COLORS.border)}
-                onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handlePush(); }}
+                onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleRequestPush(); }}
               />
             </div>
 
@@ -483,7 +487,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
                 Cancel
               </button>
               <button
-                onClick={handlePush}
+                onClick={handleRequestPush}
                 disabled={!commitMessage.trim()}
                 className="flex items-center gap-2 px-4 py-2 rounded-[8px] text-white text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: COLORS.btnGreen }}
@@ -492,6 +496,41 @@ export default function PushModal({ onClose, onSuccess }: Props) {
               >
                 <Upload size={14} />
                 Push
+              </button>
+            </>
+          )}
+
+          {phase === 'confirming' && (
+            <>
+              <div className="flex-1">
+                <p className="text-xs leading-relaxed" style={{ color: COLORS.muted }}>
+                  This will commit <strong style={{ color: '#fff' }}>{commitMessage.trim()}</strong> and push
+                  <strong style={{ color: '#fff' }}>
+                    {' '}{hasChanges
+                      ? ` ${preview!.addedMods.length + preview!.updatedMods.length + preview!.removedMods.length + preview!.changedFiles.length} change${preview!.addedMods.length + preview!.updatedMods.length + preview!.removedMods.length + preview!.changedFiles.length !== 1 ? 's' : ''}`
+                      : ' all changes'}
+                  </strong> to the remote repository.
+                  All team members will see these changes after the next pull.
+                </p>
+              </div>
+              <button
+                onClick={() => setPhase('idle')}
+                className="px-3 py-2 rounded-[8px] text-sm transition-colors flex-shrink-0"
+                style={{ color: COLORS.muted }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                Go back
+              </button>
+              <button
+                onClick={handleConfirmPush}
+                className="flex items-center gap-2 px-4 py-2 rounded-[8px] text-white text-sm font-medium transition-all flex-shrink-0"
+                style={{ background: COLORS.btnGreen }}
+                onMouseEnter={e => (e.currentTarget.style.background = COLORS.btnGreenHover)}
+                onMouseLeave={e => (e.currentTarget.style.background = COLORS.btnGreen)}
+              >
+                <Upload size={14} />
+                Confirm & Push
               </button>
             </>
           )}

@@ -258,6 +258,31 @@ export interface AuthCheckResult {
   error?: string;
 }
 
+export interface VersionRecord {
+  id: string;
+  manifestVersion: number;
+  timestamp: string;
+  message: string;
+  author: string;
+  commitSha: string;
+}
+
+export interface SnapshotRecord {
+  id: string;
+  timestamp: string;
+  mode: 'dev' | 'prod';
+  modCount: number;
+  fileCount: number;
+}
+
+export type ProfileMode = 'dev' | 'prod';
+
+export interface PromoteDiffEntry {
+  type: 'modAdded' | 'modRemoved' | 'modChanged' | 'fileChanged';
+  path: string;
+  name: string;
+}
+
 declare global {
   interface Window {
     electron: {
@@ -274,6 +299,8 @@ declare global {
         set: (key: string, val: string) => Promise<void>;
         getAll: () => Promise<Record<string, string>>;
         testWebhook: (url: string) => Promise<{ success: boolean; error?: string }>;
+        getReadOnly: () => Promise<boolean>;
+        setReadOnly: (enabled: boolean) => Promise<void>;
       };
       config: {
         read: () => Promise<{ success: boolean; data?: AppConfig; error?: string }>;
@@ -322,6 +349,23 @@ declare global {
         offRootFound: () => void;
         onScanProgress: (handler: (data: { message: string }) => void) => void;
         offScanProgress: () => void;
+      };
+      modrinth: {
+        getIcons: (slugs: string[]) => Promise<Record<string, string | null>>;
+      };
+      versions: {
+        list: () => Promise<{ success: boolean; data?: VersionRecord[]; error?: string }>;
+        rollback: (versionId: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+        current: () => Promise<{ success: boolean; manifestVersion?: number | null; error?: string }>;
+      };
+      profile: {
+        getMode: () => Promise<ProfileMode>;
+        setMode: (mode: ProfileMode) => Promise<void>;
+        snapshot: () => Promise<{ success: boolean; data?: SnapshotRecord; error?: string }>;
+        listSnapshots: () => Promise<{ success: boolean; data?: SnapshotRecord[]; error?: string }>;
+        restore: (snapshotId: string) => Promise<{ success: boolean; error?: string }>;
+        promote: () => Promise<{ success: boolean; copiedMods?: number; copiedFiles?: number; error?: string }>;
+        promotePreview: () => Promise<{ success: boolean; data?: PromoteDiffEntry[]; error?: string }>;
       };
       app: {
         openExternal: (url: string) => Promise<void>;

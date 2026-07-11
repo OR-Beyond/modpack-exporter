@@ -38,6 +38,8 @@ const api = {
     set: (key: string, val: string) => ipcRenderer.invoke('settings:set', key, val),
     getAll: () => ipcRenderer.invoke('settings:get-all'),
     testWebhook: (url: string) => ipcRenderer.invoke('settings:test-webhook', { url }),
+    getReadOnly: () => ipcRenderer.invoke('settings:get-read-only'),
+    setReadOnly: (enabled: boolean) => ipcRenderer.invoke('settings:set-read-only', { enabled }),
   },
   config: {
     read: () => ipcRenderer.invoke('config:read'),
@@ -98,6 +100,23 @@ const api = {
       ipcRenderer.on('modpack:scan-progress', (_e, data: { message: string }) => handler(data));
     },
     offScanProgress: () => ipcRenderer.removeAllListeners('modpack:scan-progress'),
+  },
+  versions: {
+    list: () => ipcRenderer.invoke('versions:list'),
+    rollback: (versionId: string) => ipcRenderer.invoke('versions:rollback', { versionId }),
+    current: () => ipcRenderer.invoke('versions:current'),
+  },
+  profile: {
+    getMode: () => ipcRenderer.invoke('profile:get-mode'),
+    setMode: (mode: string) => ipcRenderer.invoke('profile:set-mode', { mode }),
+    snapshot: () => ipcRenderer.invoke('profile:snapshot'),
+    listSnapshots: () => ipcRenderer.invoke('profile:list-snapshots'),
+    restore: (snapshotId: string) => ipcRenderer.invoke('profile:restore', { snapshotId }),
+    promote: () => ipcRenderer.invoke('profile:promote'),
+    promotePreview: () => ipcRenderer.invoke('profile:promote-preview'),
+  },
+  modrinth: {
+    getIcons: (slugs: string[]) => ipcRenderer.invoke('modrinth:get-icons', slugs),
   },
   app: {
     openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),

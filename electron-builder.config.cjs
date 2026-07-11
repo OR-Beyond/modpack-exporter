@@ -27,12 +27,13 @@ module.exports = {
       releaseType: 'release',
     },
   ],
+
+  // ── Windows ───────────────────────────────────────────────────────────────
   win: {
     icon: 'build/icons/icon.ico',
     target: [
-      { target: 'nsis', arch: ['x64'] },
-      { target: 'msi', arch: ['x64'] },
-      { target: 'portable', arch: ['x64'] },
+      { target: 'nsis', arch: ['x64', 'arm64'] },
+      { target: 'msi', arch: ['x64', 'arm64'] },
     ],
     executableName: 'orb-modpack-exporter',
     requestedExecutionLevel: 'asInvoker',
@@ -40,7 +41,7 @@ module.exports = {
   nsis: {
     oneClick: false,
     perMachine: false,
-    allowToChangeInstallationDirectory: true,
+    allowToChangeInstallationDirectory: false,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
     shortcutName: 'ORB Modpack Exporter',
@@ -54,40 +55,45 @@ module.exports = {
     createStartMenuShortcut: true,
     shortcutName: 'ORB Modpack Exporter',
   },
-  linux: {
-    icon: 'build/icons',
-    category: 'Utility',
-    maintainer: 'ORB Team',
-    synopsis: 'Minecraft modpack collaboration and export tool',
-    syncDesktopName: true,
-    target: [
-      { target: 'AppImage', arch: ['x64'] },
-      { target: 'deb', arch: ['x64'] },
-      { target: 'rpm', arch: ['x64'] },
-    ],
-  },
-  deb: {
-    depends: [
-      'libgtk-3-0',
-      'libnotify4',
-      'libnss3',
-      'libxss1',
-      'libxtst6',
-      'xdg-utils',
-    ],
-  },
+
+  // ── macOS ──────────────────────────────────────────────────────────────────
   mac: {
     icon: 'build/icons/icon.icns',
     category: 'public.app-category.developer-tools',
     target: [
       { target: 'dmg', arch: ['x64', 'arm64'] },
-      { target: 'zip', arch: ['x64', 'arm64'] },
-      { target: 'pkg', arch: ['x64', 'arm64'] },
     ],
     hardenedRuntime: true,
     gatekeeperAssess: false,
+    // Set identity to null for ad-hoc signing; for production, use a real
+    // Apple Developer ID certificate to avoid quarantine on first launch:
+    //   identity: 'Developer ID Application: Your Name (TEAMID)'
+    identity: null,
   },
   dmg: {
     sign: false,
+    artifactName: '${productName}-${version}-mac-${arch}.dmg',
+  },
+  afterPack: null,
+
+  // ── Linux ──────────────────────────────────────────────────────────────────
+  linux: {
+    icon: 'build/icons/1024x1024.png',
+    category: 'Utility',
+    maintainer: 'ORB Team',
+    synopsis: 'Minecraft modpack collaboration and export tool',
+    description: 'A desktop collaboration tool that lets Minecraft modpack developers sync mods, export releases, and manage team contributions.',
+    target: [
+      { target: 'AppImage', arch: ['x64', 'arm64'] },
+    ],
+  },
+  appImage: {
+    artifactName: '${productName}-${version}-linux-x86_64.AppImage',
+    synopsis: 'ORB Modpack Exporter',
+    description: 'Minecraft modpack collaboration tool',
+    category: 'Utility',
+    // Update identifier for AppImageLauncher / Shelly (CachyOS)
+    // This enables launcher-managed updates and integration
+    updateInfo: true,
   },
 };

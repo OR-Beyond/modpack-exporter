@@ -16,6 +16,8 @@ export interface StoreSchema {
   /** Optional custom Modrinth App data folder (parent of profiles/), for portable
    *  or non-default installs the fixed %APPDATA%/ModrinthApp scan won't find. */
   modrinthPath: string;
+  /** When true, push and pull operations are blocked to prevent accidental profile changes. */
+  readOnlyMode: boolean;
 }
 
 export const store = new Store<StoreSchema>({
@@ -30,5 +32,6 @@ export const store = new Store<StoreSchema>({
     modrinthProjectId: 'O5wGsyGR',
     initialSetupComplete: '',
     modrinthPath: '',
+    readOnlyMode: false,
   },
 });
