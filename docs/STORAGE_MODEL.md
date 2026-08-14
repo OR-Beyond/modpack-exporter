@@ -107,9 +107,6 @@ step) if the corresponding local file no longer exists.
   `screenshot-checksum-caches.json`, `libraries`, `loader`, `lwjgl3-natives`, `version.json`.
   These are caches/binaries/machine state, not modpack content. Also, any `.jar`/`.meta` file
   under `essential/` is skipped regardless of path (`shouldSkipEssentialFile`).
-- **`CONFIG_EXCLUDE`** — excluded only from the final `.mrpack` **export** zip (still synced to
-  the versions repo itself): `config/fancymenu`, `config/defaultoptions`,
-  `config/simpleupdatechecker_modpack.json`.
 - **Personal files** — `options.txt`, `keybindings.txt`, `servers.dat`, and anything not under an
   `OVERRIDE_FOLDERS` folder or `INCLUDE_FILES` list are never touched by sync at all; they simply
   aren't in scope.

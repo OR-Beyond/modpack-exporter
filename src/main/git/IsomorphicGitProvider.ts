@@ -169,6 +169,11 @@ export class IsomorphicGitProvider implements GitProvider {
     return blob;
   }
 
+  async getParentOid(dir: string, oid: string): Promise<string | null> {
+    const commit = await git.readCommit({ fs, dir, oid });
+    return commit.commit.parent[0] ?? null;
+  }
+
   async getCommitTreeDiff(dir: string, oid: string): Promise<TreeEntry[]> {
     const commit = await git.readCommit({ fs, dir, oid });
     const parentOid = commit.commit.parent[0];

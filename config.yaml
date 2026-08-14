@@ -34,11 +34,6 @@ exclude_subfolders:
     - ice-logs
     - image-cache
 
-config_exclude:
-  - fancymenu
-  - defaultoptions
-  - simpleupdatechecker_modpack.json
-
 lite_whitelist:
   mods:
     - fabric-api

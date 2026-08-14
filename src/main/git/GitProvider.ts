@@ -57,6 +57,7 @@ export interface GitProvider {
   statusMatrix(dir: string): Promise<StatusRow[]>;
   log(dir: string, options?: { depth?: number; ref?: string; since?: Date }): Promise<CommitDescription[]>;
   readBlob(dir: string, oid: string, filepath: string): Promise<Uint8Array>;
+  getParentOid(dir: string, oid: string): Promise<string | null>;
   getCommitTreeDiff(dir: string, oid: string): Promise<TreeEntry[]>;
   diffRefs(dir: string, ref1: string, ref2: string, pathPrefix?: string): Promise<string[]>;
   diffLastCommit(dir: string, pathPrefix?: string): Promise<string[]>;

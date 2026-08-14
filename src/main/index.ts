@@ -705,23 +705,32 @@ function getAppIconPath() {
 
 // ─── Manifest diff ────────────────────────────────────────────────────────────
 
-interface ManifestMod { filename: string; title?: string; version?: string }
-interface ModChange { type: 'added' | 'removed' | 'updated'; name: string }
+interface ManifestFile { path: string; hashes?: { sha512?: string }; downloads?: string[] }
+interface ModChange { type: 'added' | 'removed' | 'updated'; name: string; slug: string }
 
 function diffManifests(
-  old: { mods?: ManifestMod[] },
-  next: { mods?: ManifestMod[] }
+  old: { files?: ManifestFile[] },
+  next: { files?: ManifestFile[] },
 ): ModChange[] {
   const changes: ModChange[] = [];
-  const oldMap = new Map((old.mods || []).map(m => [m.filename, m]));
-  const newMap = new Map((next.mods || []).map(m => [m.filename, m]));
-  for (const [fn, mod] of newMap) {
-    const label = mod.title || fn.replace('.jar', '');
-    if (!oldMap.has(fn)) changes.push({ type: 'added', name: label });
-    else if (oldMap.get(fn)!.version !== mod.version) changes.push({ type: 'updated', name: label });
+  const modsOf = (m: { files?: ManifestFile[] }) =>
+    (m.files ?? []).filter(f => f.path.startsWith('mods/') && f.path.endsWith('.jar'));
+  const slugOf = (f: ManifestFile) => f.path.slice('mods/'.length).replace(/\.jar$/, '');
+  const oldList = modsOf(old);
+  const nextList = modsOf(next);
+  const oldMap = new Map(oldList.map(f => [slugOf(f), f]));
+  const nextMap = new Map(nextList.map(f => [slugOf(f), f]));
+  for (const [slug, mod] of nextMap) {
+    const oldF = oldMap.get(slug);
+    if (!oldF) changes.push({ type: 'added', name: slug, slug });
+    else {
+      const urlChanged = oldF.downloads?.[0] !== mod.downloads?.[0];
+      const hashChanged = oldF.hashes?.sha512 && mod.hashes?.sha512 && oldF.hashes.sha512 !== mod.hashes.sha512;
+      if (urlChanged || hashChanged) changes.push({ type: 'updated', name: slug, slug });
+    }
   }
-  for (const [fn, mod] of oldMap) {
-    if (!newMap.has(fn)) changes.push({ type: 'removed', name: mod.title || fn.replace('.jar', '') });
+  for (const [slug] of oldMap) {
+    if (!nextMap.has(slug)) changes.push({ type: 'removed', name: slug, slug });
   }
   return changes;
 }
@@ -875,13 +884,6 @@ const ESSENTIAL_EXCLUDE = new Set([
   'screenshot-metadata', 'screenshot-checksum-caches.json',
   'libraries', 'loader', 'lwjgl3-natives', 'version.json',
 ]);
-
-// Paths (relative to overrides/) excluded from public .mrpack exports only
-const CONFIG_EXCLUDE = [
-  'config/fancymenu',
-  'config/defaultoptions',
-  'config/simpleupdatechecker_modpack.json',
-];
 
 function getVersionsRepoDir(): string {
   return path.join(app.getPath('userData'), 'versions-repo');
@@ -1340,7 +1342,7 @@ function registerIpc() {
         deletions: f.deletions ?? 0,
       }));
       const configChanged = files.some(f => f.filename === 'config.yaml');
-      const manifestFiles = files.filter(f => f.filename.startsWith('manifests/') && !f.filename.includes('lite') && f.status === 'modified');
+      const manifestFiles = files.filter(f => f.filename === 'modrinth.index.json' && f.status !== 'removed');
 
       let modChanges: ModChange[] = [];
       if (commit.parents.length > 0) {
@@ -2686,8 +2688,11 @@ function registerIpc() {
           newManifest = JSON.parse(new TextDecoder().decode(blob));
         } catch {}
         try {
-          const blob = await gitProvider.readBlob(versionsDir, sha + '^', 'modrinth.index.json');
-          oldManifest = JSON.parse(new TextDecoder().decode(blob));
+          const parentOid = await gitProvider.getParentOid(versionsDir, sha);
+          if (parentOid) {
+            const blob = await gitProvider.readBlob(versionsDir, parentOid, 'modrinth.index.json');
+            oldManifest = JSON.parse(new TextDecoder().decode(blob));
+          }
         } catch {}
 
         if (newManifest?.files && Array.isArray(newManifest.files)) {
@@ -3708,15 +3713,12 @@ function registerIpc() {
 
       sendP('copying', 'Copying override files…', 50);
       const overridesDir = path.join(versionsDir, 'overrides');
-      const isExcludedFromMrpack = (rel: string) =>
-        CONFIG_EXCLUDE.some(ex => rel === ex || rel.startsWith(ex + '/'));
 
       for (const folder of OVERRIDE_FOLDERS) {
         const srcDir = path.join(overridesDir, folder);
         if (!fs.existsSync(srcDir)) continue;
         for (const file of walkDir(srcDir)) {
           const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
-          if (isExcludedFromMrpack(rel)) continue;
           zip.addFile(`overrides/${rel}`, fs.readFileSync(file));
         }
       }
@@ -3755,18 +3757,22 @@ function registerIpc() {
 
   // Sync mods
 
-  // Modrinth icon cache — disk (<userData>/cache/mod-icons/<slug>.png) plus an
-  // in-memory layer (slug → data URL) so repeat lookups skip re-read/re-encode,
-  // and an in-flight dedupe so N concurrent requests for one slug share a fetch.
-  const iconMemoryCache = new Map<string, string | null>();
-  const iconInflight = new Map<string, Promise<string | null>>();
+  // Icon cache — disk (<userData>/cache/mod-icons/) + memory + in-flight dedupe.
+  // Definitive results (URL or confirmed missing) are memoized; transient
+  // failures (network hiccup) are not, so they get retried next time instead of
+  // poisoning the session. A `<slug>.missing` marker records absent projects
+  // with a 7-day TTL so they are not re-fetched every launch.
+  interface ModIconResult { url: string | null; definitive: boolean }
+  const iconMemoryCache = new Map<string, ModIconResult>();
+  const iconInflight = new Map<string, Promise<ModIconResult>>();
+  const ICON_MISSING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-  async function resolveModIcon(slug: string): Promise<string | null> {
+  async function resolveModIcon(slug: string): Promise<ModIconResult> {
     if (iconMemoryCache.has(slug)) return iconMemoryCache.get(slug)!;
     const pending = iconInflight.get(slug);
     if (pending) return pending;
 
-    const task = (async (): Promise<string | null> => {
+    const task = (async (): Promise<ModIconResult> => {
       const cacheDir = path.join(app.getPath('userData'), 'cache', 'mod-icons');
       await fs.promises.mkdir(cacheDir, { recursive: true });
       const UA = { 'User-Agent': 'ORB-Modpack-Exporter/1.0' };
@@ -3774,46 +3780,65 @@ function registerIpc() {
         const cachedPath = path.join(cacheDir, `${slug}.png`);
         if (fs.existsSync(cachedPath)) {
           const data = fs.readFileSync(cachedPath);
-          return `data:image/png;base64,${data.toString('base64')}`;
+          return { url: `data:image/png;base64,${data.toString('base64')}`, definitive: true };
+        }
+
+        const missingPath = path.join(cacheDir, `${slug}.missing`);
+        if (fs.existsSync(missingPath)) {
+          const mtime = fs.statSync(missingPath).mtimeMs;
+          if (Date.now() - mtime < ICON_MISSING_TTL_MS) return { url: null, definitive: true };
+          fs.rmSync(missingPath, { force: true });
         }
 
         const res = await fetch(`https://api.modrinth.com/v2/project/${encodeURIComponent(slug)}`, {
           headers: UA, signal: AbortSignal.timeout(5000),
         });
-        if (!res.ok) return null;
+        if (res.status === 404) {
+          fs.writeFileSync(missingPath, '');
+          return { url: null, definitive: true };
+        }
+        if (!res.ok) return { url: null, definitive: false };
 
         const project: any = await res.json();
         const iconUrl: string | undefined = project.icon_url;
-        if (!iconUrl) return null;
+        if (!iconUrl) {
+          fs.writeFileSync(missingPath, '');
+          return { url: null, definitive: true };
+        }
 
         const iconRes = await fetch(iconUrl, { signal: AbortSignal.timeout(5000) });
-        if (!iconRes.ok) return null;
+        if (!iconRes.ok) return { url: null, definitive: false };
 
         const buf = Buffer.from(await iconRes.arrayBuffer());
         fs.writeFileSync(cachedPath, buf);
-        return `data:image/png;base64,${buf.toString('base64')}`;
+        return { url: `data:image/png;base64,${buf.toString('base64')}`, definitive: true };
       } catch {
-        return null;
+        return { url: null, definitive: false };
       }
     })();
 
     iconInflight.set(slug, task);
     try {
-      const url = await task;
-      iconMemoryCache.set(slug, url);
-      return url;
+      const result = await task;
+      if (result.definitive) iconMemoryCache.set(slug, result);
+      return result;
     } finally {
       iconInflight.delete(slug);
     }
   }
 
   ipcMain.handle('modrinth:get-icons', async (_e, slugs: string[]) => {
-    const results: Record<string, string | null> = {};
-    await Promise.all(
-      [...new Set(slugs)].map(async slug => {
+    const unique = [...new Set(slugs)];
+    const results: Record<string, ModIconResult> = {};
+    const CONCURRENCY = 6;
+    let next = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, unique.length) }, async () => {
+      while (next < unique.length) {
+        const slug = unique[next++];
         results[slug] = await resolveModIcon(slug);
-      })
-    );
+      }
+    });
+    await Promise.all(workers);
     return results;
   });
 

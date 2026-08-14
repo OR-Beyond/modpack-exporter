@@ -201,8 +201,7 @@ truth and produce subtly different results.
    `dependencies` from the `minecraftVersion`/`fabricLoaderVersion` settings if not already
    present, strips the internal `source` field from every file entry.
 4. Zips directly with `AdmZip`: `modrinth.index.json` at the root; every `OVERRIDE_FOLDERS` file
-   under `overrides/<folder>` (skipping `CONFIG_EXCLUDE` paths — `config/fancymenu`,
-   `config/defaultoptions`, `config/simpleupdatechecker_modpack.json`); `INCLUDE_FILES`; and any
+   under `overrides/<folder>`; `INCLUDE_FILES`; and any
    `"source": "local"` mod, read from `<modpackRoot>/mods/<name>` (or
    `<versions-repo>/overrides/mods/<name>` as a fallback) and bundled into `overrides/mods/`.
 5. Writes the zip to the chosen `outputPath`.

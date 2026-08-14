@@ -23,9 +23,15 @@ export interface GitHubUser {
   html_url: string;
 }
 
+export interface ModIconResult {
+  url: string | null;
+  definitive: boolean;
+}
+
 export interface ModChange {
   type: 'added' | 'removed' | 'updated';
   name: string;
+  slug: string;
 }
 
 export interface CommitFile {
@@ -358,7 +364,7 @@ declare global {
         offScanProgress: () => void;
       };
       modrinth: {
-        getIcons: (slugs: string[]) => Promise<Record<string, string | null>>;
+        getIcons: (slugs: string[]) => Promise<Record<string, ModIconResult>>;
       };
       logs: {
         get: () => Promise<{ success: boolean; data?: LogEntry[]; error?: string }>;

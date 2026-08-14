@@ -8,6 +8,7 @@ import ModIconLazy from '../common/ModIconLazy';
 import ModStatusBadge from '../common/ModStatusBadge';
 import Badge from '../base/Badge';
 import { timeAgo } from '../../utils/format';
+import { prefetchModIcons } from '../../utils/modIcons';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
       } else if (filesRes.success && filesRes.data) {
         changes = {
           mods: filesRes.data.modChanges.map(mc => ({
-            slug: mc.name.toLowerCase().replace(/\s+/g, '-'),
+            slug: mc.slug,
             name: mc.name,
             iconUrl: null,
             versionNumber: null,
@@ -104,6 +105,10 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
 
       setLocalChanges(changes);
       fetchAttempted.current = true;
+
+      if (changes.mods.length > 0) {
+        prefetchModIcons(changes.mods.map(m => m.slug));
+      }
     } catch (err) {
       // Transient failure — keep whatever was loaded and allow a retry on the
       // next hover/click instead of showing an empty list forever.

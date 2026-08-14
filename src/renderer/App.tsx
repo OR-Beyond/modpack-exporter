@@ -19,6 +19,7 @@ import PullResultPopup from '@/lib/components/PullResultPopup';
 import InitialSetupScreen, { InitProgress } from '@/lib/components/InitialSetupScreen';
 import Button from '@/lib/components/base/Button';
 import BrandLogo from '@/lib/components/common/BrandLogo';
+import { prefetchModIcons } from '@/lib/utils/modIcons';
 import { initLogger } from '@/lib/utils/logger';
 import { initSettingsCache } from '@/lib/utils/settingsCache';
 
@@ -172,7 +173,7 @@ export default function App() {
           } else if (r.success && r.data) {
             changes = {
               mods: r.data.modChanges.map(mc => ({
-                slug: mc.name.toLowerCase().replace(/\s+/g, '-'),
+                slug: mc.slug,
                 name: mc.name,
                 iconUrl: null,
                 versionNumber: null,
@@ -196,9 +197,13 @@ export default function App() {
                     changes,
                     detailsLoaded: true,
                   }
-                : c
+                  : c
             )
           );
+
+          if (changes?.mods.length) {
+            prefetchModIcons(changes.mods.map(m => m.slug));
+          }
         })
       );
     },
