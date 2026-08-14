@@ -5,6 +5,8 @@ interface CollapsibleListProps<T> {
   items: T[];
   /** Renders a single item row. */
   renderItem: (item: T, index: number) => React.ReactNode;
+  /** Stable key per item (defaults to the item index). */
+  getKey?: (item: T, index: number) => string;
   /** How many rows are shown before "Show all". */
   limit?: number;
   className?: string;
@@ -14,6 +16,7 @@ interface CollapsibleListProps<T> {
 export default function CollapsibleList<T>({
   items,
   renderItem,
+  getKey,
   limit = 5,
   className = '',
 }: CollapsibleListProps<T>) {
@@ -24,7 +27,7 @@ export default function CollapsibleList<T>({
   return (
     <div className={className}>
       {visible.map((item, i) => (
-        <React.Fragment key={i}>{renderItem(item, i)}</React.Fragment>
+        <React.Fragment key={getKey ? getKey(item, i) : i}>{renderItem(item, i)}</React.Fragment>
       ))}
       {!expanded && hidden > 0 && (
         <button

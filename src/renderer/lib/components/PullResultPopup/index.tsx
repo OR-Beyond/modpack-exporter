@@ -4,6 +4,7 @@ import type { PullFileChange, PullModEntry, PullModUpdate } from '../../types';
 import Modal, { ModalHeader, ModalFooter } from '../base/Modal';
 import Button from '../base/Button';
 import ModIcon from '../common/ModIcon';
+import ModStatusBadge from '../common/ModStatusBadge';
 import Section from '../common/Section';
 import CollapsibleList from '../common/CollapsibleList';
 
@@ -55,8 +56,9 @@ export default function PullResultPopup({
         <Section label="Updated" tone="warning" count={updatedMods.length}>
           <CollapsibleList
             items={updatedMods}
-            renderItem={(mod, i) => (
-              <div key={i} className="flex items-center gap-3 min-w-0">
+            getKey={mod => mod.slug}
+            renderItem={(mod) => (
+              <div className="flex items-center gap-3 min-w-0">
                 <ModIcon iconUrl={mod.iconUrl} name={mod.name} size="lg" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate leading-snug">{mod.name}</p>
@@ -66,6 +68,7 @@ export default function PullResultPopup({
                     </p>
                   )}
                 </div>
+                <ModStatusBadge status="updated" versionNumber={mod.newVersionNumber} oldVersionNumber={mod.oldVersionNumber} />
               </div>
             )}
           />
@@ -75,8 +78,9 @@ export default function PullResultPopup({
         <Section label="Added" tone="success" count={addedMods.length}>
           <CollapsibleList
             items={addedMods}
-            renderItem={(mod, i) => (
-              <div key={i} className="flex items-center gap-3 min-w-0">
+            getKey={mod => mod.slug}
+            renderItem={(mod) => (
+              <div className="flex items-center gap-3 min-w-0">
                 <ModIcon iconUrl={mod.iconUrl} name={mod.name} size="lg" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate leading-snug">{mod.name}</p>
@@ -86,6 +90,7 @@ export default function PullResultPopup({
                     </p>
                   )}
                 </div>
+                <ModStatusBadge status="added" />
               </div>
             )}
           />
@@ -95,8 +100,9 @@ export default function PullResultPopup({
         <Section label="Removed" tone="danger" count={removedMods.length}>
           <CollapsibleList
             items={removedMods}
-            renderItem={(mod, i) => (
-              <div key={i} className="flex items-center gap-3 min-w-0 opacity-70">
+            getKey={mod => mod.slug}
+            renderItem={(mod) => (
+              <div className="flex items-center gap-3 min-w-0 opacity-70">
                 <ModIcon iconUrl={mod.iconUrl} name={mod.name} size="lg" dimmed />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate leading-snug">{mod.name}</p>
@@ -106,6 +112,7 @@ export default function PullResultPopup({
                     </p>
                   )}
                 </div>
+                <ModStatusBadge status="removed" />
               </div>
             )}
           />
@@ -115,8 +122,9 @@ export default function PullResultPopup({
         <Section label="Files" tone="neutral" count={changedFiles.length}>
           <CollapsibleList
             items={changedFiles}
-            renderItem={(file, i) => (
-              <div key={i} className="flex items-center gap-2 min-w-0 py-0.5">
+            getKey={file => file.path}
+            renderItem={(file) => (
+              <div className="flex items-center gap-2 min-w-0 py-0.5">
                 <span
                   className={`text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 uppercase tracking-wide ${FILE_TONE_CLASSES[file.status]}`}
                 >

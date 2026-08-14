@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { CommitCard, CommitChanges, CommitFileEntry, CommitModEntry } from '../../types';
 import ModIconLazy from '../common/ModIconLazy';
+import ModStatusBadge from '../common/ModStatusBadge';
 import Badge from '../base/Badge';
 import { timeAgo } from '../../utils/format';
 
@@ -26,27 +27,6 @@ function StatusDot({ status }: { status: string }) {
     : status === 'removed' ? 'bg-danger'
     : 'bg-warning-soft';
   return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color}`} />;
-}
-
-function ModStatusBadge({ status, versionNumber, oldVersionNumber }: {
-  status: CommitModEntry['status'];
-  versionNumber: string | null;
-  oldVersionNumber?: string | null;
-}) {
-  if (status === 'added') {
-    return <Badge tone="success">Added</Badge>;
-  }
-  if (status === 'removed') {
-    return <Badge tone="danger">Removed</Badge>;
-  }
-  if (oldVersionNumber && versionNumber && oldVersionNumber !== versionNumber) {
-    return (
-      <span className="text-xs text-muted-foreground flex-shrink-0">
-        {oldVersionNumber} → {versionNumber}
-      </span>
-    );
-  }
-  return <Badge tone="warning">Updated</Badge>;
 }
 
 function FileTypeIcon({ filepath }: { filepath: string }) {
@@ -90,8 +70,7 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
   const isLoaded = commit.detailsLoaded || localChanges !== null;
 
   const triggerLoad = async () => {
-    if (fetchAttempted.current || commit.detailsLoaded) return;
-    fetchAttempted.current = true;
+    if (fetchAttempted.current || commit.detailsLoaded || fetchLoading) return;
     const parsed = parseOwnerRepo(commit.url);
     if (!parsed) return;
     setFetchLoading(true);
@@ -124,8 +103,11 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
       }
 
       setLocalChanges(changes);
-    } catch {
-      setLocalChanges({ mods: [], otherFiles: [] });
+      fetchAttempted.current = true;
+    } catch (err) {
+      // Transient failure — keep whatever was loaded and allow a retry on the
+      // next hover/click instead of showing an empty list forever.
+      console.warn(`[activity] failed to load changes for ${commit.sha}:`, err);
     }
     setFetchLoading(false);
   };
@@ -353,7 +335,7 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
                               className="flex flex-col gap-0.5 mt-1 mb-0.5"
                               style={{ paddingLeft: 20 }}
                             >
-                              {configs.map((file, i) => <ConfigFileRow key={i} file={file} />)}
+                              {configs.map(file => <ConfigFileRow key={file.path} file={file} />)}
                             </div>
                           )}
                         </div>
@@ -370,8 +352,8 @@ export default function ActivityCard({ commit, fullDate = false }: Props) {
                 {/* Other files */}
                 {ungroupedFiles.length > 0 && (
                   <div className="flex flex-col gap-1">
-                    {ungroupedFiles.map((file, i) => (
-                      <div key={i} className="flex items-center gap-1.5 min-w-0">
+                    {ungroupedFiles.map(file => (
+                      <div key={file.path} className="flex items-center gap-1.5 min-w-0">
                         <StatusDot status={file.status} />
                         <FileTypeIcon filepath={file.path} />
                         <span className="text-xs font-mono truncate flex-1 text-muted-foreground">

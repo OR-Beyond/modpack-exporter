@@ -9,6 +9,7 @@ import HistoryPage from '@/lib/components/HistoryPage';
 import Sidebar from '@/lib/components/Sidebar';
 import SettingsPage from '@/lib/components/SettingsPage';
 import LogsPage from '@/lib/components/LogsPage';
+import IssuesPage from '@/lib/components/IssuesPage';
 import PushModal from '@/lib/components/PushModal';
 import ExportModal from '@/lib/components/ExportModal';
 import SettingsModal from '@/lib/components/SettingsModal';
@@ -141,7 +142,7 @@ export default function App() {
   }, []);
 
   const loadIssues = useCallback(async (cfg: AppConfig) => {
-    const parsed = parseRepoUrl(cfg.github_repo);
+    const parsed = parseRepoUrl(cfg.reports_repo || cfg.github_repo);
     if (!parsed) return;
     const r = await window.electron.github.getIssues(parsed);
     if (r.success && r.data) {
@@ -714,7 +715,9 @@ export default function App() {
               onExport={() => setShowExport(true)}
               onReportBug={() =>
                 config &&
-                window.electron.app.openExternal(`${config.github_repo.replace('.git', '')}/issues/new`)
+                window.electron.app.openExternal(
+                  `${(config.reports_repo || config.github_repo).replace('.git', '')}/issues/new`
+                )
               }
               profileMode={profileMode}
             />
@@ -738,8 +741,12 @@ export default function App() {
             if (mrRes.version_number) setModrinthRelease(mrRes.version_number);
           }}
         />
-      ) : (
+      ) : page === 'issues' ? (
+        <IssuesPage />
+      ) : page === 'logs' ? (
         <LogsPage />
+      ) : (
+        null
       )}
 
       {showPush && <PushModal onClose={() => setShowPush(false)} onSuccess={handlePushSuccess} />}

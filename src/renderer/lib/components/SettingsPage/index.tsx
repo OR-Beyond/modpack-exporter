@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Send, Loader2, ArrowLeft, FolderOpen, Server, Moon, Sun,
+  Send, Loader2, ArrowLeft, FolderOpen, Server,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ProfileSelector from '../SettingsModal/ProfileSelector';
 import ConfirmDialog from '../ConfirmDialog';
 import { getCachedSetting, setCachedSetting } from '@/lib/utils/settingsCache';
-import { useTheme, THEMES } from '@/lib/theme/ThemeProvider';
+import { useTheme } from '@/lib/theme/ThemeProvider';
+import { THEMES } from '@/lib/theme/themes';
 import type { PromoteDiffEntry, ProfileMode } from '@/lib/types';
 import Button from '../base/Button';
 import Input, { LABEL_CLASSES } from '../base/Input';
@@ -16,6 +17,32 @@ import Toggle from '../base/Toggle';
 interface Props {
   onBack: () => void;
   onSaved: () => void;
+}
+
+/** Mini mock of the app shell, colored from a theme's own tokens. */
+function ThemePreview({ tokens }: { tokens: Record<string, string> }) {
+  const c = (k: string) => `rgb(${tokens[k]})`;
+  return (
+    <div
+      className="flex h-16 gap-1.5 rounded-lg border p-1.5"
+      style={{ background: c('--color-background'), borderColor: c('--color-line-strong') }}
+    >
+      <div className="flex w-1/3 flex-col gap-1 rounded-md p-1" style={{ background: c('--color-card') }}>
+        <div className="h-1 w-full rounded-sm" style={{ background: c('--color-primary') }} />
+        <div className="h-1 w-3/4 rounded-sm" style={{ background: c('--color-muted') }} />
+        <div className="h-1 w-1/2 rounded-sm" style={{ background: c('--color-muted-foreground') }} />
+      </div>
+      <div className="flex flex-1 flex-col gap-1">
+        <div className="h-1.5 w-3/4 rounded-sm" style={{ background: c('--color-foreground') }} />
+        <div className="h-1 w-1/2 rounded-sm" style={{ background: c('--color-muted') }} />
+        <div className="mt-auto flex gap-1">
+          <div className="h-2.5 w-1/2 rounded-sm" style={{ background: c('--color-primary') }} />
+          <div className="h-2.5 w-1/4 rounded-sm" style={{ background: c('--color-success') }} />
+          <div className="h-2.5 w-1/4 rounded-sm" style={{ background: c('--color-warning') }} />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function SettingsPage({ onBack, onSaved }: Props) {
@@ -337,19 +364,25 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
           <div>
             <label className={LABEL_CLASSES}>Theme</label>
             <p className="text-muted text-xs mb-2">
-              Switch between the dark and light appearance. Applied instantly and remembered across launches.
+              Pick an appearance for the whole app. Applied instantly and remembered across launches.
             </p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {THEMES.map(t => (
                 <button
-                  key={t}
-                  onClick={() => setTheme(t)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium capitalize border transition-colors ${
-                    theme === t ? 'bg-primary/10 text-primary border-primary/40' : 'text-muted border-line/8 hover:bg-line/10'
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTheme(t.id)}
+                  className={`flex flex-col gap-1.5 rounded-xl border p-2 text-left transition-colors ${
+                    theme === t.id
+                      ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/30'
+                      : 'border-line/8 hover:bg-line/10'
                   }`}
                 >
-                  {t === 'dark' ? <Moon size={12} /> : <Sun size={12} />}
-                  {t}
+                  <ThemePreview tokens={t.tokens} />
+                  <div>
+                    <p className="text-xs font-medium text-foreground">{t.name}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{t.description}</p>
+                  </div>
                 </button>
               ))}
             </div>

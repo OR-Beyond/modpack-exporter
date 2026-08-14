@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Settings, ChevronDown, LogOut, Github, LayoutDashboard, ScrollText, History,
+  Settings, ChevronDown, LogOut, Github, LayoutDashboard, ScrollText, History, CircleDot,
 } from 'lucide-react';
 import type { GitHubUser } from '../../types';
 import appIcon from '../../../assets/icon.png';
 import WindowControls from '../WindowControls';
 
-export type Page = 'home' | 'history' | 'settings' | 'logs';
+export type Page = 'home' | 'history' | 'issues' | 'settings' | 'logs';
 
 interface Props {
   user: GitHubUser | null;
@@ -20,6 +20,7 @@ interface Props {
 const navItems: { page: Page; label: string; icon: React.ReactNode }[] = [
   { page: 'home', label: 'Home', icon: <LayoutDashboard size={16} /> },
   { page: 'history', label: 'History', icon: <History size={16} /> },
+  { page: 'issues', label: 'Issues', icon: <CircleDot size={16} /> },
   { page: 'logs', label: 'Logs', icon: <ScrollText size={16} /> },
   { page: 'settings', label: 'Settings', icon: <Settings size={16} /> },
 ];

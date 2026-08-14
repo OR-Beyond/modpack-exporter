@@ -7,6 +7,7 @@ import Button from '../base/Button';
 import Textarea from '../base/Textarea';
 import ProgressBar from '../base/ProgressBar';
 import ModIcon from '../common/ModIcon';
+import ModStatusBadge from '../common/ModStatusBadge';
 
 interface Props {
   onClose: () => void;
@@ -47,6 +48,7 @@ function AddedModRow({ mod }: { mod: PushPreviewMod }) {
           {mod.versionNumber}
         </span>
       )}
+      <ModStatusBadge status="added" />
     </div>
   );
 }
@@ -65,6 +67,7 @@ function UpdatedModRow({ mod }: { mod: PushPreviewUpdate }) {
         )}
         <span className="text-warning-soft">{mod.versionNumber ?? '?'}</span>
       </div>
+      <ModStatusBadge status="updated" versionNumber={mod.versionNumber} oldVersionNumber={mod.oldVersionNumber} />
     </div>
   );
 }
@@ -79,6 +82,7 @@ function RemovedModRow({ mod }: { mod: PushPreviewMod }) {
           {mod.versionNumber}
         </span>
       )}
+      <ModStatusBadge status="removed" />
     </div>
   );
 }
@@ -205,7 +209,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
           <div>
             <SectionHeader title="Added Mods" colorClass="text-success bg-success" count={addedMods.length} />
             <div className="flex flex-col gap-1.5 pl-3.5">
-              {addedMods.map((mod, i) => <AddedModRow key={i} mod={mod} />)}
+              {addedMods.map(mod => <AddedModRow key={mod.slug} mod={mod} />)}
             </div>
           </div>
         )}
@@ -215,7 +219,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
           <div>
             <SectionHeader title="Updated Mods" colorClass="text-warning-soft bg-warning-soft" count={updatedMods.length} />
             <div className="flex flex-col gap-1.5 pl-3.5">
-              {updatedMods.map((mod, i) => <UpdatedModRow key={i} mod={mod} />)}
+              {updatedMods.map(mod => <UpdatedModRow key={mod.slug} mod={mod} />)}
             </div>
           </div>
         )}
@@ -225,7 +229,7 @@ export default function PushModal({ onClose, onSuccess }: Props) {
           <div>
             <SectionHeader title="Removed Mods" colorClass="text-danger bg-danger" count={removedMods.length} />
             <div className="flex flex-col gap-1.5 pl-3.5">
-              {removedMods.map((mod, i) => <RemovedModRow key={i} mod={mod} />)}
+              {removedMods.map(mod => <RemovedModRow key={mod.slug} mod={mod} />)}
             </div>
           </div>
         )}
@@ -254,8 +258,8 @@ export default function PushModal({ onClose, onSuccess }: Props) {
             >
               <div className="overflow-hidden">
                 <div className="flex flex-col gap-1 pl-3.5 pb-0.5">
-                  {changedFiles.map((f, i) => (
-                    <div key={i} className="flex items-center gap-2 min-w-0">
+                  {changedFiles.map(f => (
+                    <div key={f.path} className="flex items-center gap-2 min-w-0">
                       <div
                         className={`w-1 h-1 rounded-full flex-shrink-0 ${
                           f.status === 'added'   ? 'bg-success' :

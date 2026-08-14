@@ -1,15 +1,22 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-
-export type ThemeName = 'dark' | 'light';
-
-export const THEMES: ThemeName[] = ['dark', 'light'];
+import { THEMES, DEFAULT_THEME, isThemeId, type ThemeId } from './themes';
 
 const STORAGE_KEY = 'orb.theme';
-const DEFAULT_THEME: ThemeName = 'dark';
 
-/** Applies the theme attribute to <html> — also used pre-render to avoid a flash. */
-export function applyTheme(theme: ThemeName): void {
-  document.documentElement.dataset.theme = theme;
+/**
+ * Applies the theme's tokens as inline CSS custom properties on <html> plus the
+ * `data-theme` attribute — also used pre-render to avoid a flash on startup.
+ * Tokens live in themes.ts (single source of truth); globals.css only provides
+ * a minimal fallback for the first paint.
+ */
+export function applyTheme(themeId: ThemeId): void {
+  const theme = THEMES.find(t => t.id === themeId) ?? DEFAULT_THEME;
+  const el = document.documentElement;
+  el.dataset.theme = theme.id;
+  el.style.colorScheme = theme.colorScheme;
+  for (const [key, value] of Object.entries(theme.tokens)) {
+    el.style.setProperty(key, value);
+  }
 }
 
 /** Applies the persisted theme before React mounts (no flash on startup). */
@@ -17,28 +24,28 @@ export function initTheme(): void {
   applyTheme(readStoredTheme());
 }
 
-function readStoredTheme(): ThemeName {
+function readStoredTheme(): ThemeId {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light') return stored;
+    if (stored !== null && isThemeId(stored)) return stored;
   } catch {
     // localStorage unavailable — fall back to default.
   }
-  return DEFAULT_THEME;
+  return DEFAULT_THEME.id;
 }
 
 interface ThemeContextValue {
-  theme: ThemeName;
-  setTheme: (theme: ThemeName) => void;
+  theme: ThemeId;
+  setTheme: (theme: ThemeId) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: DEFAULT_THEME,
+  theme: DEFAULT_THEME.id,
   setTheme: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeName>(readStoredTheme);
+  const [theme, setThemeState] = useState<ThemeId>(readStoredTheme);
 
   useEffect(() => {
     applyTheme(theme);
@@ -49,7 +56,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [theme]);
 
-  const setTheme = useCallback((next: ThemeName) => {
+  const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next);
   }, []);
 

@@ -54,6 +54,7 @@ const api = {
     getCommits: (o: unknown) => ipcRenderer.invoke('github:get-commits', o),
     getCommitFiles: (o: unknown) => ipcRenderer.invoke('github:get-commit-files', o),
     getIssues: (o: unknown) => ipcRenderer.invoke('github:get-issues', o),
+    getLabels: (o: unknown) => ipcRenderer.invoke('github:get-labels', o),
   },
   git: {
     ensureVersionsRepo: () => ipcRenderer.invoke('git:ensure-versions-repo'),

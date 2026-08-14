@@ -5,99 +5,47 @@
 /* ─────────────────────────────────────────────────────────────────────────────
  * Design tokens — the single source of truth for every color in the app.
  *
- * Channel values are stored as bare RGB triplets so Tailwind utilities can
- * layer opacity on top (`bg-card/50`, `border-line/8`, …). To keep a hardcoded
- * color out of a component, map it onto one of these tokens instead.
+ * Token values (RGB channel triplets) live in src/renderer/lib/theme/themes.ts
+ * and are applied at runtime as inline CSS custom properties on <html> by
+ * ThemeProvider (so themes can switch instantly and be added without touching
+ * CSS). Channel values stay bare RGB triplets so Tailwind utilities can layer
+ * opacity on top (`bg-card/50`, `border-line/8`, …). To keep a hardcoded color
+ * out of a component, map it onto one of these tokens instead.
+ *
+ * The :root block below is only a first-paint fallback before JS runs.
  * ─────────────────────────────────────────────────────────────────────────── */
 
-:root[data-theme='dark'] {
+:root {
   color-scheme: dark;
 
-  /* Surfaces */
-  --color-background: 30 30 30;          /* page background           (#1E1E1E) */
-  --color-foreground: 255 255 255;       /* primary text */
-  --color-card: 38 38 42;                /* modal / card surfaces     (#26262A) */
-  --color-card-foreground: 255 255 255;  /* text on card */
-  --color-muted: 169 169 171;            /* secondary text            (#A9A9AB) */
-  --color-muted-foreground: 139 148 158; /* tertiary text             (#8b949e) */
-  --color-subtle: 24 24 26;              /* inset surfaces: inputs, preview panels */
-
-  /* Borders */
-  --color-line: 255 255 255;             /* hairline border — use with /6 /8 /12 */
-  --color-line-strong: 48 54 61;         /* solid border              (#30363d) */
-
-  /* Interactive */
-  --color-ring: 8 144 254;               /* focus rings                (#0890FE) */
-  --color-primary: 8 144 254;            /* primary action             (#0890FE) */
-  --color-primary-hover: 26 157 255;     /* primary action hover       (#1a9dff) */
-  --color-link: 88 166 255;              /* inline links / soft blue   (#58a6ff) */
-
-  /* Semantic */
-  --color-success: 32 172 100;           /* positive                   (#20AC64) */
-  --color-success-strong: 35 134 54;     /* solid success button       (#238636) */
-  --color-warning: 255 168 9;            /* amber                      (#FFA809) */
-  --color-warning-soft: 210 153 29;      /* soft warning text          (#d2991d) */
-  --color-danger: 248 81 73;             /* errors / removed           (#f85149) */
-  --color-danger-strong: 218 54 51;      /* solid danger button        (#da3633) */
-
-  /* Brand */
-  --color-brand: 226 71 41;              /* logo gradient start        (#E24729) */
-  --color-brand-end: 255 63 110;         /* logo gradient end          (#FF3F6E) */
-
-  /* Overlays / misc */
-  --color-overlay: 0 0 0;                /* modal scrim — use with /65 /75 /78 */
-  --color-on-accent: 255 255 255;        /* text sitting on colored buttons */
-  --color-on-warning: 30 30 30;          /* text on warning surfaces (constant dark in both themes) */
+  /* Fallback surface + text (dark) — ThemeProvider overwrites these at runtime. */
+  --color-background: 30 30 30;
+  --color-foreground: 255 255 255;
+  --color-card: 38 38 42;
+  --color-card-foreground: 255 255 255;
+  --color-muted: 169 169 171;
+  --color-muted-foreground: 139 148 158;
+  --color-subtle: 24 24 26;
+  --color-line: 255 255 255;
+  --color-line-strong: 48 54 61;
+  --color-ring: 8 144 254;
+  --color-primary: 8 144 254;
+  --color-primary-hover: 26 157 255;
+  --color-link: 88 166 255;
+  --color-success: 32 172 100;
+  --color-success-strong: 35 134 54;
+  --color-warning: 255 168 9;
+  --color-warning-soft: 210 153 29;
+  --color-danger: 248 81 73;
+  --color-danger-strong: 218 54 51;
+  --color-brand: 226 71 41;
+  --color-brand-end: 255 63 110;
+  --color-overlay: 0 0 0;
+  --color-on-accent: 255 255 255;
+  --color-on-warning: 30 30 30;
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
-
-  /* Surfaces */
-  --color-background: 255 255 255;       /* page background */
-  --color-foreground: 31 35 40;          /* primary text               (#1f2328) */
-  --color-card: 246 248 250;             /* modal / card surfaces      (#f6f8fa) */
-  --color-card-foreground: 31 35 40;     /* text on card */
-  --color-muted: 89 99 110;              /* secondary text             (#59636e) */
-  --color-muted-foreground: 129 139 152; /* tertiary text              (#818b98) */
-  --color-subtle: 240 244 248;           /* inset surfaces             (#f0f4f8) */
-
-  /* Borders */
-  --color-line: 0 0 0;                   /* hairline border — use with /6 /8 /12 */
-  --color-line-strong: 209 217 224;      /* solid border               (#d1d9e0) */
-
-  /* Interactive */
-  --color-ring: 9 105 218;               /* focus rings                (#0969da) */
-  --color-primary: 9 105 218;            /* primary action             (#0969da) */
-  --color-primary-hover: 8 94 196;       /* primary action hover */
-  --color-link: 9 105 218;               /* inline links / soft blue   (#0969da) */
-
-  /* Semantic */
-  --color-success: 26 127 55;            /* positive                   (#1a7f37) */
-  --color-success-strong: 26 127 55;     /* solid success button       (#1a7f37) */
-  --color-warning: 154 103 0;            /* amber                      (#9a6700) */
-  --color-warning-soft: 154 103 0;       /* soft warning text */
-  --color-danger: 207 34 46;             /* errors / removed           (#cf222e) */
-  --color-danger-strong: 207 34 46;      /* solid danger button        (#cf222e) */
-
-  /* Brand */
-  --color-brand: 226 71 41;              /* logo gradient start        (#E24729) */
-  --color-brand-end: 255 63 110;         /* logo gradient end          (#FF3F6E) */
-
-  /* Overlays / misc */
-  --color-overlay: 0 0 0;                /* modal scrim — use with /65 /75 /78 */
-  --color-on-accent: 255 255 255;        /* text sitting on colored buttons */
-
-  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
-}
-
-:root {
-  --color-background: 30 30 30;
-  --color-foreground: 255 255 255;
 }
 
 * {

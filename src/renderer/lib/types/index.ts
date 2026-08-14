@@ -7,6 +7,7 @@ export interface AppConfig {
   lite_version: string;
   github_repo: string;
   github_branch: string;
+  reports_repo: string;
   modrinth_id: string;
   modrinth_url: string;
   lite_modrinth_id: string;
@@ -78,6 +79,9 @@ export interface Issue {
   title: string;
   html_url: string;
   created_at: string;
+  state: 'open' | 'closed';
+  comments: number;
+  body?: string;
   user: { login: string; avatar_url: string };
   labels: IssueLabel[];
 }
@@ -314,7 +318,8 @@ declare global {
         getUser: () => Promise<{ success: boolean; data?: GitHubUser; error?: string }>;
         getCommits: (o: { owner: string; repo: string; branch: string }) => Promise<{ success: boolean; data?: any[]; error?: string }>;
         getCommitFiles: (o: { owner: string; repo: string; sha: string }) => Promise<{ success: boolean; data?: { files: CommitFile[]; modChanges: ModChange[]; configChanged: boolean }; error?: string }>;
-        getIssues: (o: { owner: string; repo: string }) => Promise<{ success: boolean; data?: Issue[]; error?: string }>;
+        getIssues: (o: { owner: string; repo: string; state?: 'open' | 'closed' | 'all'; labels?: string; sort?: 'created' | 'updated' | 'comments'; direction?: 'asc' | 'desc'; per_page?: number }) => Promise<{ success: boolean; data?: Issue[]; error?: string }>;
+        getLabels: (o: { owner: string; repo: string }) => Promise<{ success: boolean; data?: IssueLabel[]; error?: string }>;
       };
       git: {
         ensureVersionsRepo: () => Promise<{ success: boolean; error?: string }>;

@@ -1298,6 +1298,19 @@ function registerIpc() {
   });
 
   // GitHub
+  // Maps GitHub API errors to user-facing messages, flagging rate limits so the
+  // UI can show a clear "try again later" state instead of a raw error string.
+  const describeGitHubError = (e: any): string => {
+    const remaining = e?.response?.headers?.['x-ratelimit-remaining'];
+    if (e?.status === 403 && remaining === '0') {
+      return 'GitHub API rate limit exceeded. Try again in a few minutes.';
+    }
+    if (e?.status === 401) {
+      return 'GitHub authentication failed. Sign out and sign in again.';
+    }
+    return e?.message || 'GitHub API error';
+  };
+
   ipcMain.handle('github:get-user', async () => {
     const oc = getOctokit();
     if (!oc) return { success: false, error: 'No token' };
@@ -1348,11 +1361,28 @@ function registerIpc() {
     } catch (e: any) { return { success: false, error: e.message }; }
   });
 
-  ipcMain.handle('github:get-issues', async (_e, { owner, repo }: { owner: string; repo: string }) => {
+  ipcMain.handle('github:get-issues', async (_e, {
+    owner, repo, state = 'open', labels, sort, direction, per_page = 10,
+  }: {
+    owner: string; repo: string;
+    state?: 'open' | 'closed' | 'all';
+    labels?: string;
+    sort?: 'created' | 'updated' | 'comments';
+    direction?: 'asc' | 'desc';
+    per_page?: number;
+  }) => {
     const oc = getOctokit();
     if (!oc) return { success: false, error: 'No token' };
     try {
-      const { data } = await oc.issues.listForRepo({ owner, repo, state: 'open', per_page: 10 });
+      // `comments` sort only supports descending — force it so the API never rejects.
+      const dir = sort === 'comments' ? 'desc' : (direction ?? 'desc');
+      const { data } = await oc.issues.listForRepo({
+        owner, repo, state,
+        ...(labels ? { labels } : {}),
+        sort: sort ?? 'created',
+        direction: dir,
+        per_page,
+      });
       // Exclude pull requests (GitHub returns them via the issues endpoint), strip down labels.
       const issues = data
         .filter(i => !i.pull_request)
@@ -1361,6 +1391,9 @@ function registerIpc() {
           title: i.title,
           html_url: i.html_url,
           created_at: i.created_at,
+          state: i.state,
+          comments: i.comments ?? 0,
+          body: i.body ?? '',
           user: i.user
             ? { login: i.user.login, avatar_url: i.user.avatar_url }
             : { login: 'unknown', avatar_url: 'https://github.com/ghost.png' },
@@ -1369,7 +1402,19 @@ function registerIpc() {
             .filter(l => l.name),
         }));
       return { success: true, data: issues };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeGitHubError(e) }; }
+  });
+
+  ipcMain.handle('github:get-labels', async (_e, { owner, repo }: { owner: string; repo: string }) => {
+    const oc = getOctokit();
+    if (!oc) return { success: false, error: 'No token' };
+    try {
+      const { data } = await oc.issues.listLabelsForRepo({ owner, repo, per_page: 100 });
+      return {
+        success: true,
+        data: data.map(l => ({ name: l.name, color: (l.color || '888888').replace(/^#/, '') })),
+      };
+    } catch (e: any) { return { success: false, error: describeGitHubError(e) }; }
   });
 
   // Modpack root detection

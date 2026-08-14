@@ -15,6 +15,7 @@ import Button from '../base/Button';
 import Input, { LABEL_CLASSES } from '../base/Input';
 import Textarea from '../base/Textarea';
 import ProgressBar from '../base/ProgressBar';
+import ModStatusBadge, { type ModStatus } from '../common/ModStatusBadge';
 import { bumpPatch, formatSize } from '../../utils/format';
 
 interface Props {
@@ -39,8 +40,8 @@ function Dot({ className }: { className: string }) {
   return <span className={`w-[7px] h-[7px] rounded-full flex-shrink-0 inline-block ${className}`} />;
 }
 
-function ModList({ mods, dotClass, labelClass, label }: {
-  mods: { name: string }[]; dotClass: string; labelClass: string; label: string;
+function ModList({ mods, status, dotClass, labelClass, label }: {
+  mods: { name: string }[]; status: ModStatus; dotClass: string; labelClass: string; label: string;
 }) {
   if (mods.length === 0) return null;
   return (
@@ -49,10 +50,11 @@ function ModList({ mods, dotClass, labelClass, label }: {
         {label} ({mods.length})
       </p>
       <div className="flex flex-col gap-1">
-        {mods.map((m, i) => (
-          <div key={i} className="flex items-center gap-2 min-w-0">
+        {mods.map(m => (
+          <div key={m.name} className="flex items-center gap-2 min-w-0">
             <Dot className={dotClass} />
-            <span className="text-xs truncate text-foreground/80">{m.name}</span>
+            <span className="text-xs truncate text-foreground/80 flex-1">{m.name}</span>
+            <ModStatusBadge status={status} />
           </div>
         ))}
       </div>
@@ -79,8 +81,8 @@ function FileList({ added, removed, changed }: { added: string[]; removed: strin
         Changed Files ({all.length})
       </p>
       <div className="flex flex-col gap-1">
-        {visible.map(({ f, status }, i) => (
-          <div key={i} className="flex items-center gap-2 min-w-0">
+        {visible.map(({ f, status }) => (
+          <div key={f} className="flex items-center gap-2 min-w-0">
             <Dot className={dotClass[status]} />
             <span className="text-xs font-mono truncate text-foreground/80">{f}</span>
           </div>
@@ -142,9 +144,9 @@ function DiffSummary({ result }: { result: ChangelogResult }) {
           Comparing against v{d.from}
         </p>
       )}
-      <ModList mods={d.addedMods}   dotClass="bg-success" labelClass="text-success" label="Added Mods"   />
-      <ModList mods={d.removedMods} dotClass="bg-brand"   labelClass="text-brand"   label="Removed Mods" />
-      <ModList mods={d.updatedMods} dotClass="bg-warning" labelClass="text-warning" label="Updated Mods" />
+      <ModList mods={d.addedMods}   status="added"   dotClass="bg-success" labelClass="text-success" label="Added Mods"   />
+      <ModList mods={d.removedMods} status="removed" dotClass="bg-brand"   labelClass="text-brand"   label="Removed Mods" />
+      <ModList mods={d.updatedMods} status="updated" dotClass="bg-warning" labelClass="text-warning" label="Updated Mods" />
       <FileList added={d.addedFiles} removed={d.removedFiles} changed={d.changedFiles} />
     </div>
   );
