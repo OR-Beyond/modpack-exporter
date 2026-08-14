@@ -341,7 +341,7 @@ declare global {
       };
       export: {
         run: (o: ExportOptions) => Promise<ExportResult>;
-        mrpack: (o: { outputPath: string; version: string; changelog?: string; overwriteSnapshot?: boolean }) => Promise<{ success: boolean; path?: string; size?: number; error?: string }>;
+        mrpack: (o: { outputPath: string; version: string; changelog?: string; overwriteSnapshot?: boolean; includeFancyMenu?: boolean; includeDefaultOptions?: boolean }) => Promise<{ success: boolean; path?: string; size?: number; published?: boolean; publishedVersionId?: string; error?: string }>;
         saveDialog: (opts: { defaultPath?: string }) => Promise<string | null>;
         latestModrinthVersion: (projectId: string) => Promise<{ version_number: string | null; versionId?: string; publishedAt?: string; reason?: string }>;
         manifestVersion: () => Promise<{ success: boolean; versionId: number | null; error?: string }>;

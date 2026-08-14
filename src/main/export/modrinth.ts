@@ -218,6 +218,78 @@ export async function getLatestModrinthVersion(projectId: string): Promise<strin
   return null;
 }
 
+export interface PublishOptions {
+  projectId: string;
+  versionNumber: string;
+  name: string;
+  changelog: string;
+  gameVersions: string[];
+  loaders: string[];
+  mrpackPath: string;
+}
+
+export interface PublishResult {
+  success: boolean;
+  versionId?: string;
+  error?: string;
+}
+
+export async function publishVersion(
+  token: string,
+  opts: PublishOptions,
+): Promise<PublishResult> {
+  try {
+    const existingRes = await fetch(
+      `${MODRINTH_BASE}/project/${encodeURIComponent(opts.projectId)}/version`,
+      { headers: UA_HEADERS, signal: AbortSignal.timeout(8000) },
+    );
+    if (existingRes.ok) {
+      const versions: any[] = await existingRes.json();
+      const existing = versions.find(v => v.version_number === opts.versionNumber);
+      if (existing) {
+        return {
+          success: false,
+          error: `Version ${opts.versionNumber} is already published on Modrinth. Refusing to overwrite — bump the version number instead.`,
+        };
+      }
+    }
+  } catch {}
+
+  const form = new FormData();
+  form.append('data', JSON.stringify({
+    name: opts.name,
+    version_number: opts.versionNumber,
+    changelog: opts.changelog,
+    dependencies: [],
+    game_versions: opts.gameVersions,
+    version_type: 'release',
+    loaders: opts.loaders,
+    featured: false,
+    project_id: opts.projectId,
+    file_parts: ['file'],
+  }));
+  form.append('file', new Blob([fs.readFileSync(opts.mrpackPath)], { type: 'application/zip' }), path.basename(opts.mrpackPath));
+
+  try {
+    const res = await fetch(`${MODRINTH_BASE}/version`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...UA_HEADERS },
+      body: form,
+      signal: AbortSignal.timeout(120000),
+    });
+    const body: any = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        success: false,
+        error: body?.description || `Modrinth API returned ${res.status}`,
+      };
+    }
+    return { success: true, versionId: body?.id as string | undefined };
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Network error while publishing to Modrinth' };
+  }
+}
+
 async function resolveLoaderVersion(root: string, configLoaderVersion?: string): Promise<string | null> {
   if (configLoaderVersion && !/[><=]/.test(configLoaderVersion)) {
     return configLoaderVersion;

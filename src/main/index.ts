@@ -10,6 +10,7 @@ import { autoUpdater } from 'electron-updater';
 import { store, StoreSchema } from './store';
 import { IsomorphicGitProvider } from './git';
 import { buildExport } from './export';
+import { publishVersion } from './export/modrinth';
 import {
   startDeviceAuth,
   logout as authLogout,
@@ -3185,7 +3186,7 @@ function registerIpc() {
     try {
       const res = await fetch(
         `https://api.modrinth.com/v2/project/${encodeURIComponent(projectId)}/version`,
-        { headers: { 'User-Agent': 'ORB-Modpack-Exporter/1.0' } }
+        { headers: { 'User-Agent': 'ORB-Modpack-Exporter/1.0' }, signal: AbortSignal.timeout(5000) }
       );
       if (!res.ok) return { version_number: null, reason: `Modrinth API returned ${res.status}` };
       const versions = await res.json() as any[];
@@ -3604,11 +3605,15 @@ function registerIpc() {
     version,
     changelog,
     overwriteSnapshot = false,
+    includeFancyMenu = true,
+    includeDefaultOptions = true,
   }: {
     outputPath: string;
     version: string;
     changelog?: string;
     overwriteSnapshot?: boolean;
+    includeFancyMenu?: boolean;
+    includeDefaultOptions?: boolean;
   }) => {
     const versionsDir = getVersionsRepoDir();
     const profileMode = getProfileMode(app.getPath('userData'));
@@ -3619,6 +3624,13 @@ function registerIpc() {
       mainWindow?.webContents.send('export:progress', { stage, message, percent });
 
     if (!root) return { success: false, error: 'No modpack root configured.' };
+
+    if (profileMode === 'prod' && !store.get('modrinthToken')) {
+      return {
+        success: false,
+        error: 'Production mode requires a Modrinth token to publish. Add it in Settings → Modrinth.',
+      };
+    }
 
     const manifestPath = path.join(versionsDir, 'modrinth.index.json');
     if (!fs.existsSync(manifestPath)) {
@@ -3719,6 +3731,8 @@ function registerIpc() {
         if (!fs.existsSync(srcDir)) continue;
         for (const file of walkDir(srcDir)) {
           const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
+          if (!includeFancyMenu && rel.startsWith('config/fancymenu/')) continue;
+          if (!includeDefaultOptions && rel.startsWith('config/defaultoptions/')) continue;
           zip.addFile(`overrides/${rel}`, fs.readFileSync(file));
         }
       }
@@ -3748,6 +3762,34 @@ function registerIpc() {
       zip.writeZip(outputPath);
 
       const size = fs.statSync(outputPath).size;
+
+      if (profileMode === 'prod') {
+        sendP('publishing', 'Publishing to Modrinth…', 92);
+        const publish = await publishVersion(store.get('modrinthToken'), {
+          projectId: store.get('modrinthProjectId') || 'O5wGsyGR',
+          versionNumber: version,
+          name: manifest.name || `ORB ${version}`,
+          changelog: changelog ?? '',
+          gameVersions: [store.get('minecraftVersion') || '1.21.1'],
+          loaders: ['fabric'],
+          mrpackPath: outputPath,
+        });
+        if (!publish.success) {
+          return {
+            success: false,
+            error: `Export succeeded, but publishing to Modrinth failed: ${publish.error}`,
+          };
+        }
+        sendP('done', 'Export complete!', 100);
+        return {
+          success: true,
+          path: outputPath,
+          size,
+          published: true,
+          publishedVersionId: publish.versionId,
+        };
+      }
+
       sendP('done', 'Export complete!', 100);
       return { success: true, path: outputPath, size };
     } catch (e: any) {

@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Send, Loader2, ArrowLeft, FolderOpen, Server,
+  Send, Loader2, ArrowLeft, FolderOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ProfileSelector from '../SettingsModal/ProfileSelector';
-import ConfirmDialog from '../ConfirmDialog';
 import { getCachedSetting, setCachedSetting } from '@/lib/utils/settingsCache';
 import { useTheme } from '@/lib/theme/ThemeProvider';
 import { THEMES } from '@/lib/theme/themes';
-import type { PromoteDiffEntry, ProfileMode } from '@/lib/types';
 import Button from '../base/Button';
+import Card from '../base/Card';
 import Input, { LABEL_CLASSES } from '../base/Input';
 import IconButton from '../base/IconButton';
 import Toggle from '../base/Toggle';
@@ -45,11 +44,21 @@ function ThemePreview({ tokens }: { tokens: Record<string, string> }) {
   );
 }
 
+function SectionTitle({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="mb-4">
+      <h3 className="text-foreground font-semibold text-xs uppercase tracking-wide">{title}</h3>
+      <p className="text-muted text-xs mt-1 leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
 export default function SettingsPage({ onBack, onSaved }: Props) {
   const [modpackRoot, setModpackRoot] = useState('');
   const [exportDir, setExportDir] = useState('');
   const [discordWebhook, setDiscordWebhook] = useState('');
   const [modrinthProjectId, setModrinthProjectId] = useState('O5wGsyGR');
+  const [modrinthToken, setModrinthToken] = useState('');
   const [minecraftVersion, setMinecraftVersion] = useState('1.21.1');
   const [fabricLoaderVersion, setFabricLoaderVersion] = useState('0.16.9');
   const [isSaving, setIsSaving] = useState(false);
@@ -57,11 +66,6 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
   const [hasChanges, setHasChanges] = useState(false);
   const [readOnlyEnabled, setReadOnlyEnabled] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
-  const [profileMode, setProfileMode] = useState<ProfileMode>('dev');
-  const [isPromoting, setIsPromoting] = useState(false);
-  const [promoteDiff, setPromoteDiff] = useState<PromoteDiffEntry[] | null>(null);
-  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
-  const [pendingPromotePreview, setPendingPromotePreview] = useState<PromoteDiffEntry[] | null | undefined>(undefined);
 
   const { theme, setTheme } = useTheme();
 
@@ -70,12 +74,12 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
     setExportDir(getCachedSetting('exportDir'));
     setDiscordWebhook(getCachedSetting('discordWebhook'));
     setModrinthProjectId(getCachedSetting('modrinthProjectId') || 'O5wGsyGR');
+    setModrinthToken(getCachedSetting('modrinthToken'));
     setMinecraftVersion(getCachedSetting('minecraftVersion') || '1.21.1');
     setFabricLoaderVersion(getCachedSetting('fabricLoaderVersion') || '0.16.9');
 
     window.electron.settings.getReadOnly().then(setReadOnlyEnabled);
     window.electron.settings.getAutoSyncOnLaunch().then(setAutoSyncEnabled);
-    window.electron.profile.getMode().then(setProfileMode);
   }, []);
 
   const handleProfileSelected = (path: string) => {
@@ -102,33 +106,6 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
     toast(next ? 'Auto-sync on launch enabled' : 'Auto-sync on launch disabled');
   };
 
-  const handlePromote = async () => {
-    const preview = await window.electron.profile.promotePreview();
-    if (preview.success && preview.data && preview.data.length > 0) {
-      setPromoteDiff(preview.data);
-      setPendingPromotePreview(preview.data);
-    } else {
-      setPendingPromotePreview(null);
-    }
-    setShowPromoteConfirm(true);
-  };
-
-  const handleConfirmPromote = async () => {
-    setShowPromoteConfirm(false);
-    setPromoteDiff(null);
-    setPendingPromotePreview(undefined);
-
-    setIsPromoting(true);
-    const r = await window.electron.profile.promote();
-    setIsPromoting(false);
-    if (r.success) {
-      toast.success(`Promoted: ${r.copiedMods} mods, ${r.copiedFiles} files`);
-      setProfileMode('prod');
-    } else {
-      toast.error(`Promote failed: ${r.error}`);
-    }
-  };
-
   const handleTestWebhook = async () => {
     if (!discordWebhook.trim()) { toast.error('Enter a webhook URL first'); return; }
     setIsTestingWebhook(true);
@@ -145,6 +122,7 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
       setCachedSetting('exportDir', exportDir.trim()),
       setCachedSetting('discordWebhook', discordWebhook.trim()),
       setCachedSetting('modrinthProjectId', modrinthProjectId.trim() || 'O5wGsyGR'),
+      setCachedSetting('modrinthToken', modrinthToken.trim()),
       setCachedSetting('minecraftVersion', minecraftVersion.trim() || '1.21.1'),
       setCachedSetting('fabricLoaderVersion', fabricLoaderVersion.trim() || '0.16.9'),
     ]);
@@ -169,122 +147,109 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-xl flex flex-col gap-6">
-          {/* Modpack Root */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Modpack Root Directory <span className="text-brand">*</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Your Minecraft profile directory that contains a{' '}
-              <code className="bg-line/10 px-1 rounded">mods/</code> subfolder.
-            </p>
-            <ProfileSelector selectedPath={modpackRoot} onSelected={handleProfileSelected} />
-          </div>
+        <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
 
-          {/* Export Directory */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Export Directory <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Where <code className="bg-line/10 px-1 rounded">.mrpack</code> files are saved.
-              Defaults to <code className="bg-line/10 px-1 rounded">modpack_root/Modpack Export/</code>.
-            </p>
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Input
-                  value={exportDir}
-                  onChange={e => { setExportDir(e.target.value); setHasChanges(true); }}
-                  placeholder="Leave blank for default"
-                />
+          {/* Account & Git */}
+          <Card className="p-4 md:col-span-2">
+            <SectionTitle
+              title="Account & Git"
+              description="Your modpack profile and where exported .mrpack files land."
+            />
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className={LABEL_CLASSES}>
+                  Modpack Root Directory <span className="text-brand">*</span>
+                </label>
+                <ProfileSelector selectedPath={modpackRoot} onSelected={handleProfileSelected} />
               </div>
-              <IconButton
-                icon={FolderOpen}
-                label="Browse"
-                variant="secondary"
-                sizeClass="px-3 py-2"
-                onClick={selectExportDir}
-              />
+
+              <div>
+                <label className={LABEL_CLASSES}>
+                  Export Directory <span className="text-muted font-normal">(optional)</span>
+                </label>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Input
+                      value={exportDir}
+                      onChange={e => { setExportDir(e.target.value); setHasChanges(true); }}
+                      placeholder="Leave blank for default"
+                    />
+                  </div>
+                  <IconButton
+                    icon={FolderOpen}
+                    label="Browse"
+                    variant="secondary"
+                    sizeClass="px-3 py-2"
+                    onClick={selectExportDir}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="h-px bg-line/6" />
+          {/* Modrinth & Publishing */}
+          <Card className="p-4 md:col-span-2">
+            <SectionTitle
+              title="Modrinth & Publishing"
+              description="Project metadata, the token used to publish releases, and the game versions written to the manifest."
+            />
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL_CLASSES}>Modrinth Project ID</label>
+                  <Input
+                    value={modrinthProjectId}
+                    onChange={e => { setModrinthProjectId(e.target.value); setHasChanges(true); }}
+                    placeholder="O5wGsyGR"
+                    spellCheck={false}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL_CLASSES}>Modrinth Token</label>
+                  <Input
+                    type="password"
+                    value={modrinthToken}
+                    onChange={e => { setModrinthToken(e.target.value); setHasChanges(true); }}
+                    placeholder="mrpat_…"
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+              <p className="text-muted text-xs -mt-2">
+                Personal Access Token used to publish the modpack to Modrinth in Production mode.
+                Create one in your Modrinth account settings (Authorization).
+              </p>
 
-          {/* Read-only mode */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Read-only Mode <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              When enabled, pull and push operations are blocked. Useful when you want to
-              inspect your modpack without risking accidental changes.
-            </p>
-            <div className="flex items-center gap-3">
-              <Toggle checked={readOnlyEnabled} onChange={handleReadOnlyToggle} label="Read-only mode" />
-              <span className={`text-sm font-medium ${readOnlyEnabled ? 'text-success' : 'text-muted'}`}>
-                {readOnlyEnabled ? 'Read-only is ON' : 'Read-only is OFF'}
-              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL_CLASSES}>Minecraft version</label>
+                  <Input
+                    value={minecraftVersion}
+                    onChange={e => { setMinecraftVersion(e.target.value); setHasChanges(true); }}
+                    placeholder="1.21.1"
+                    spellCheck={false}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL_CLASSES}>Fabric Loader version</label>
+                  <Input
+                    value={fabricLoaderVersion}
+                    onChange={e => { setFabricLoaderVersion(e.target.value); setHasChanges(true); }}
+                    placeholder="0.16.9"
+                    spellCheck={false}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="h-px bg-line/6" />
-
-          {/* Auto-sync on launch */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Auto-sync on Launch <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              When enabled, the app automatically pulls the latest modpack after you log in.
-              Off by default — auto-sync can overwrite local changes you haven't pushed yet,
-              so use <span className="text-foreground/80">Pull Latest</span> manually unless you're sure.
-            </p>
-            <div className="flex items-center gap-3">
-              <Toggle checked={autoSyncEnabled} onChange={handleAutoSyncToggle} label="Auto-sync on launch" />
-              <span className={`text-sm font-medium ${autoSyncEnabled ? 'text-success' : 'text-muted'}`}>
-                {autoSyncEnabled ? 'Auto-sync is ON' : 'Auto-sync is OFF'}
-              </span>
-            </div>
-          </div>
-
-          <div className="h-px bg-line/6" />
-
-          {/* Production workspace */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Production Workspace <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Copies your mods, configs, and override files from the development profile to
-              the production workspace. Team members pulling from production receive these changes.
-            </p>
-            <div className="flex gap-2">
-              {profileMode === 'dev' && (
-                <Button
-                  variant="soft"
-                  size="sm"
-                  icon={Server}
-                  loading={isPromoting}
-                  onClick={handlePromote}
-                >
-                  {isPromoting ? 'Promoting...' : 'Promote'}
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="h-px bg-line/6" />
-
-          {/* Discord webhook */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Discord Webhook <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Receive a notification in Discord after every successful push.
-              Create one in your server's channel settings under Integrations.
-            </p>
+          {/* Notifications */}
+          <Card className="p-4">
+            <SectionTitle
+              title="Notifications"
+              description="Discord notification after every successful push."
+            />
             <div className="flex gap-2">
               <div className="flex-1">
                 <Input
@@ -303,70 +268,49 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
                 {isTestingWebhook ? 'Sending…' : 'Test'}
               </button>
             </div>
-          </div>
+          </Card>
 
-          <div className="h-px bg-line/6" />
-
-          {/* Modrinth Project ID */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Modrinth Project ID <span className="text-muted font-normal">(optional)</span>
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Used to fetch the latest published release and suggest the next version when exporting.
-              Find it in your Modrinth project settings.
-            </p>
-            <Input
-              value={modrinthProjectId}
-              onChange={e => { setModrinthProjectId(e.target.value); setHasChanges(true); }}
-              placeholder="O5wGsyGR"
-              spellCheck={false}
+          {/* Advanced */}
+          <Card className="p-4">
+            <SectionTitle
+              title="Advanced"
+              description="Safety switches that change how sync behaves."
             />
-          </div>
-
-          <div className="h-px bg-line/6" />
-
-          {/* Minecraft / Fabric Loader versions */}
-          <div>
-            <label className={LABEL_CLASSES}>
-              Minecraft &amp; Fabric Loader Versions
-            </label>
-            <p className="text-muted text-xs mb-2">
-              Written to the exported <code className="bg-line/10 px-1 rounded">modrinth.index.json</code>'s{' '}
-              <code className="bg-line/10 px-1 rounded">dependencies</code> field, required by the Modrinth App.
-              Update these when the modpack upgrades Minecraft or Fabric.
-            </p>
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <Input
-                  label="Minecraft version"
-                  value={minecraftVersion}
-                  onChange={e => { setMinecraftVersion(e.target.value); setHasChanges(true); }}
-                  placeholder="1.21.1"
-                  spellCheck={false}
-                />
+            <div className="flex flex-col gap-4">
+              <div>
+                <div className="flex items-center gap-3">
+                  <Toggle checked={readOnlyEnabled} onChange={handleReadOnlyToggle} label="Read-only mode" />
+                  <span className={`text-sm font-medium ${readOnlyEnabled ? 'text-success' : 'text-muted'}`}>
+                    {readOnlyEnabled ? 'Read-only is ON' : 'Read-only is OFF'}
+                  </span>
+                </div>
+                <p className="text-muted text-[11px] mt-1.5 leading-relaxed">
+                  When enabled, pull and push operations are blocked. Useful to inspect the
+                  modpack without risking accidental changes.
+                </p>
               </div>
-              <div className="flex-1">
-                <Input
-                  label="Fabric Loader version"
-                  value={fabricLoaderVersion}
-                  onChange={e => { setFabricLoaderVersion(e.target.value); setHasChanges(true); }}
-                  placeholder="0.16.9"
-                  spellCheck={false}
-                />
+              <div>
+                <div className="flex items-center gap-3">
+                  <Toggle checked={autoSyncEnabled} onChange={handleAutoSyncToggle} label="Auto-sync on launch" />
+                  <span className={`text-sm font-medium ${autoSyncEnabled ? 'text-success' : 'text-muted'}`}>
+                    {autoSyncEnabled ? 'Auto-sync is ON' : 'Auto-sync is OFF'}
+                  </span>
+                </div>
+                <p className="text-muted text-[11px] mt-1.5 leading-relaxed">
+                  Automatically pulls the latest modpack after login. Off by default — auto-sync
+                  can overwrite local changes you haven't pushed yet.
+                </p>
               </div>
             </div>
-          </div>
+          </Card>
 
-          <div className="h-px bg-line/6" />
-
-          {/* Theme */}
-          <div>
-            <label className={LABEL_CLASSES}>Theme</label>
-            <p className="text-muted text-xs mb-2">
-              Pick an appearance for the whole app. Applied instantly and remembered across launches.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
+          {/* Appearance */}
+          <Card className="p-4 md:col-span-2">
+            <SectionTitle
+              title="Appearance"
+              description="Pick an appearance for the whole app. Applied instantly and remembered across launches."
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               {THEMES.map(t => (
                 <button
                   key={t.id}
@@ -386,34 +330,10 @@ export default function SettingsPage({ onBack, onSaved }: Props) {
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
+
         </div>
       </div>
-
-      <ConfirmDialog
-        open={showPromoteConfirm}
-        title="Promote to Production"
-        description={
-          pendingPromotePreview && pendingPromotePreview.length > 0
-            ? `This will copy ${pendingPromotePreview.length} change${pendingPromotePreview.length !== 1 ? 's' : ''} from your development profile to the production workspace. Team members pulling from production will receive these changes.`
-            : 'This will copy all mods, configs, and override files from your development profile to the production workspace. Team members pulling from production will receive these changes.'
-        }
-        details={
-          pendingPromotePreview && pendingPromotePreview.length > 0
-            ? pendingPromotePreview.map(d =>
-                `  ${d.type === 'modAdded' ? '+' : d.type === 'modRemoved' ? '-' : '~'} ${d.name}`
-              ).join('\n')
-            : null
-        }
-        confirmLabel="Promote"
-        variant="warning"
-        onConfirm={handleConfirmPromote}
-        onCancel={() => {
-          setShowPromoteConfirm(false);
-          setPromoteDiff(null);
-          setPendingPromotePreview(undefined);
-        }}
-      />
     </div>
   );
 }

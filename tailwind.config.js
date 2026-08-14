@@ -4,6 +4,16 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
+      // Opacity modifiers only resolve against this scale. Values missing here
+      // (4, 6, 8, 12) silently drop the generated rule, so border-line/6 etc.
+      // would fall back to the opaque preflight default — keep the scale in sync
+      // with the /N usages across the codebase.
+      opacity: {
+        4: '0.04',
+        6: '0.06',
+        8: '0.08',
+        12: '0.12',
+      },
       colors: {
         // Design tokens — see src/renderer/lib/styles/globals.css.
         // Channel triplets are exposed as `rgb(var(--color-x) / <alpha-value>)`

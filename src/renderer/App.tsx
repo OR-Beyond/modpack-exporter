@@ -91,6 +91,8 @@ export default function App() {
   const initInFlightRef = React.useRef(false);
 
   const [profileMode, setProfileMode] = useState<'dev' | 'prod'>('dev');
+  const [pendingMode, setPendingMode] = useState<'dev' | 'prod' | null>(null);
+  const [modeConfirmInfo, setModeConfirmInfo] = useState<{ latestPublished: string | null; checking: boolean; checkFailed: boolean } | null>(null);
 
   // ── Undo last push state ───────────────────────────────────────────────────
   const [isUndoingLastPush, setIsUndoingLastPush] = useState(false);
@@ -595,6 +597,40 @@ export default function App() {
     setShowSettings(false);
   };
 
+  const handleModeChange = async (next: 'dev' | 'prod') => {
+    if (next === profileMode) return;
+    if (next === 'prod') {
+      setModeConfirmInfo({ latestPublished: null, checking: true, checkFailed: false });
+      setPendingMode(next);
+      const projectId =
+        (await window.electron.settings.get('modrinthProjectId').catch(() => null)) || 'O5wGsyGR';
+      const mr = await window.electron.export
+        .latestModrinthVersion(projectId)
+        .catch(() => ({ version_number: null as null, reason: 'Could not fetch from Modrinth' }));
+      setModeConfirmInfo({
+        latestPublished: mr?.version_number ?? null,
+        checking: false,
+        checkFailed: !!mr?.reason && mr.reason !== 'No published releases found',
+      });
+    } else {
+      setModeConfirmInfo({ latestPublished: null, checking: false, checkFailed: false });
+      setPendingMode(next);
+    }
+  };
+
+  const handleConfirmModeChange = async () => {
+    if (!pendingMode) return;
+    await window.electron.profile.setMode(pendingMode);
+    setProfileMode(pendingMode);
+    setPendingMode(null);
+    setModeConfirmInfo(null);
+    toast.success(
+      pendingMode === 'prod'
+        ? 'Production mode enabled — exports will be published to Modrinth'
+        : 'Development mode enabled'
+    );
+  };
+
   const handleLoginRequest = () => setShowLogin(true);
 
   const handleLoginSuccess = async () => {
@@ -725,6 +761,7 @@ export default function App() {
                 )
               }
               profileMode={profileMode}
+              onModeChange={handleModeChange}
             />
           </div>
         )
@@ -780,6 +817,34 @@ export default function App() {
           void performUndoLastPush();
         }}
         onCancel={() => setShowUndoConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={pendingMode !== null}
+        title={pendingMode === 'prod' ? 'Switch to Production Mode?' : 'Switch to Development Mode?'}
+        description={
+          pendingMode === 'prod'
+            ? 'Production mode exports from the production workspace and also publishes the modpack directly to Modrinth — the release goes live for all players, in addition to the normal Git flow. This is a sensitive action; every export stays tracked in History.'
+            : 'Development mode exports from your development profile and only runs the normal Git flow. Nothing is published to Modrinth.'
+        }
+        details={
+          pendingMode === 'prod' && modeConfirmInfo
+            ? modeConfirmInfo.checking
+              ? 'Checking latest published release…'
+              : modeConfirmInfo.checkFailed
+                ? "Couldn't check the latest published release (offline?)."
+                : modeConfirmInfo.latestPublished
+                  ? `Latest published release: v${modeConfirmInfo.latestPublished}`
+                  : 'No published releases yet — this will be the first.'
+            : null
+        }
+        confirmLabel={pendingMode === 'prod' ? 'Switch to Production' : 'Switch to Development'}
+        variant={pendingMode === 'prod' ? 'warning' : 'default'}
+        onConfirm={handleConfirmModeChange}
+        onCancel={() => {
+          setPendingMode(null);
+          setModeConfirmInfo(null);
+        }}
       />
       {pullResult && (
         <PullResultPopup

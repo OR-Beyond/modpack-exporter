@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Package,
   RotateCcw,
+  Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { AppConfig, ChangelogDiff, ChangelogResult } from '../../types';
@@ -162,10 +163,13 @@ export default function ExportModal({ config, onClose, onSuccess }: Props) {
   const [progress, setProgress]             = useState<ProgressState>({ stage: '', message: '', percent: 0 });
   const [error, setError]                   = useState<string | null>(null);
   const [fileSize, setFileSize]             = useState<number | null>(null);
+  const [published, setPublished]           = useState(false);
   const [changelogResult, setChangelogResult] = useState<ChangelogResult | null>(null);
   const [changelogText, setChangelogText]   = useState('');
   const [originalMarkdown, setOriginalMarkdown] = useState('');
   const [overwriteSnapshot, setOverwriteSnapshot] = useState(false);
+  const [includeFancyMenu, setIncludeFancyMenu] = useState(true);
+  const [includeDefaultOptions, setIncludeDefaultOptions] = useState(true);
 
   const setProgressRef = useRef(setProgress);
   setProgressRef.current = setProgress;
@@ -245,6 +249,7 @@ export default function ExportModal({ config, onClose, onSuccess }: Props) {
   const handleExport = async () => {
     if (!outputPath || !version.trim()) return;
     setError(null);
+    setPublished(false);
     setProgress({ stage: '', message: 'Starting…', percent: 0 });
     setPhase('exporting');
 
@@ -258,11 +263,18 @@ export default function ExportModal({ config, onClose, onSuccess }: Props) {
         version: version.trim(),
         changelog: changelogText,
         overwriteSnapshot,
+        includeFancyMenu,
+        includeDefaultOptions,
       });
       if (r.success) {
         setFileSize(r.size ?? null);
+        setPublished(!!r.published);
         setPhase('success');
-        toast.success(`Exported ${packName} ${version.trim()}`);
+        toast.success(
+          r.published
+            ? `Exported & published ${packName} ${version.trim()} to Modrinth`
+            : `Exported ${packName} ${version.trim()}`
+        );
       } else {
         setError(r.error ?? 'Export failed');
         setPhase('error');
@@ -341,6 +353,30 @@ export default function ExportModal({ config, onClose, onSuccess }: Props) {
                   <FolderOpen size={14} />Choose location…
                 </button>
               )}
+            </div>
+
+            <div className="flex flex-col gap-2.5 rounded-lg px-3 py-2.5 bg-subtle border border-line/6">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Include configs
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeFancyMenu}
+                  onChange={e => setIncludeFancyMenu(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-primary"
+                />
+                <span className="text-xs text-foreground/80">FancyMenu config</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeDefaultOptions}
+                  onChange={e => setIncludeDefaultOptions(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-primary"
+                />
+                <span className="text-xs text-foreground/80">Default Options config</span>
+              </label>
             </div>
           </div>
         )}
@@ -473,6 +509,13 @@ export default function ExportModal({ config, onClose, onSuccess }: Props) {
               <div className="flex justify-center">
                 <span className="text-xs px-3 py-1 rounded-full font-mono bg-success/10 text-success">
                   {formatSize(fileSize)}
+                </span>
+              </div>
+            )}
+            {published && (
+              <div className="flex justify-center">
+                <span className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-full font-mono bg-link/10 text-link border border-link/25">
+                  <Upload size={11} /> Published to Modrinth
                 </span>
               </div>
             )}

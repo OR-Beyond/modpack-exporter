@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { AppConfig, Issue, SyncStatus, ProfileMode } from '../../types';
 import Button from '../base/Button';
+import ModeToggle from '../base/ModeToggle';
 import { timeAgo } from '../../utils/format';
 
 function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
@@ -35,12 +36,13 @@ interface Props {
   onExport: () => void;
   onReportBug: () => void;
   profileMode: ProfileMode;
+  onModeChange: (mode: ProfileMode) => void;
 }
 
 export default function Sidebar({
   config, syncStatus, issues, lastExportTime, manifestVersion, modrinthRelease,
   onPull, onPush, onUndoLastPush, isUndoingLastPush, onExport, onReportBug,
-  profileMode,
+  profileMode, onModeChange,
 }: Props) {
   return (
     <div
@@ -57,11 +59,10 @@ export default function Sidebar({
               <Row label="Dev version" value={manifestVersion !== null ? String(manifestVersion) : 'N/A'} />
               <Row label="Modrinth release" value={modrinthRelease ? `v${modrinthRelease}` : 'N/A'} />
               <Row label="Minecraft" value={config.minecraft_version} />
-              <Row
-                label="Mode"
-                value={profileMode === 'prod' ? 'Production' : 'Development'}
-                valueColor={profileMode === 'prod' ? 'rgb(var(--color-primary))' : 'rgb(var(--color-warning))'}
-              />
+              <div>
+                <span className="text-muted text-xs block mb-1.5">Mode</span>
+                <ModeToggle mode={profileMode} onChange={onModeChange} />
+              </div>
               <div className="h-px bg-line/6 my-0.5" />
               <Row
                 label="Last export"
