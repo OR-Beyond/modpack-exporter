@@ -113,6 +113,10 @@ const api = {
   modrinth: {
     getIcons: (slugs: string[]) => ipcRenderer.invoke('modrinth:get-icons', slugs),
   },
+  defaults: {
+    getState: () => ipcRenderer.invoke('defaults:get-state'),
+    import: (fileType: string) => ipcRenderer.invoke('defaults:import', { fileType }),
+  },
   logs: {
     /** Snapshot of the main-process log buffer (entries emitted so far). */
     get: () => ipcRenderer.invoke('logs:get'),

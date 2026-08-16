@@ -879,6 +879,33 @@ const OVERRIDE_FOLDERS = [
 // Root-level files in the modpack that are synced into overrides/
 const INCLUDE_FILES = ['checkbox_states.json', 'emi.json'] as const;
 
+type DefaultOptionsFileType = 'options' | 'keybindings' | 'servers';
+
+// Curated Default Options files (Twelve Iterations mod) — imported from
+// {modpackRoot}/config/defaultoptions/ into {versionsRepo}/defaults/ and
+// embedded into every export under overrides/config/defaultoptions/.
+const DEFAULT_OPTIONS_FILES: Record<DefaultOptionsFileType, string> = {
+  options: 'options.txt',
+  keybindings: 'keybindings.txt',
+  servers: 'servers.dat',
+} as const;
+
+interface DefaultFileState {
+  exists: boolean;
+  localExists: boolean;
+  size?: number;
+  modified?: string;
+  localSize?: number;
+  localModified?: string;
+  sha256?: string;
+  localSha256?: string;
+}
+
+/** True for config/defaultoptions/* paths, which must never enter overrides/ sync (only defaults/ + export). */
+function isDefaultOptionsRel(fwdRelPath: string): boolean {
+  return fwdRelPath.startsWith('config/defaultoptions/');
+}
+
 // User-specific essential/ items that must never be synced (caches, binaries, machine state)
 const ESSENTIAL_EXCLUDE = new Set([
   'cache', 'cosmetic-cache', 'image-cache', 'screenshot-cache',
@@ -898,6 +925,37 @@ function computeSha512(filePath: string): string {
 
 function computeSha256(filePath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * Turns a raw Node/isomorphic-git error into a human-readable message for
+ * non-technical users. `fallback` is the human action that failed (e.g.
+ * "Could not pull changes"); known error codes get a plain-language reason,
+ * unknown errors keep their original message so nothing is lost.
+ */
+function describeFileError(e: unknown, fallback: string): string {
+  const err = e as { code?: string; message?: string } | null | undefined;
+  const code = err?.code;
+  const msg = err?.message ?? '';
+  switch (code) {
+    case 'ENOENT': return `${fallback} The file or folder could not be found.`;
+    case 'EACCES':
+    case 'EPERM': return `${fallback} Permission was denied — the app may not have access to that location.`;
+    case 'EISDIR': return `${fallback} A folder was found where a file was expected.`;
+    case 'ENOTDIR': return `${fallback} A file was found where a folder was expected.`;
+    case 'ENOSPC': return `${fallback} There is not enough free disk space.`;
+    case 'EBUSY': return `${fallback} The file is in use by another program — close it and try again.`;
+    case 'EEXIST': return `${fallback} The file or folder already exists.`;
+    case 'EROFS': return `${fallback} The drive is read-only.`;
+    case 'ENAMETOOLONG': return `${fallback} The file name is too long.`;
+    case 'EMFILE': return `${fallback} Too many files are open — close some programs and try again.`;
+    case 'ENOTEMPTY': return `${fallback} The folder is not empty.`;
+  }
+  if (/no upstream/i.test(msg)) return `${fallback} The repository branch has no remote set up yet.`;
+  if (/fetch first|non-fast-forward|rejected/i.test(msg)) return `${fallback} The remote has newer changes — pull the latest updates first.`;
+  if (/auth|unauthor|401|403|login|token/i.test(msg)) return `${fallback} GitHub authentication failed — check your login and try again.`;
+  if (msg) return `${fallback} ${msg}`;
+  return fallback;
 }
 
 // ── File system ───────────────────────────────────────────────────────────────
@@ -940,7 +998,7 @@ function syncOverridesToRepo(root: string, overridesDir: string): number {
       for (const destFile of walkDir(destDir)) {
         const rel = path.relative(destDir, destFile).replace(/\\/g, '/');
         const stale = !fs.existsSync(path.join(srcDir, rel.replace(/\//g, path.sep)));
-        if (stale || (isEssential && shouldSkipEssentialFile(rel))) {
+        if (stale || (isEssential && shouldSkipEssentialFile(rel)) || isDefaultOptionsRel(`${folder}/${rel}`)) {
           try { fs.unlinkSync(destFile); count++; } catch {}
         }
       }
@@ -951,6 +1009,7 @@ function syncOverridesToRepo(root: string, overridesDir: string): number {
       for (const srcFile of walkDir(srcDir)) {
         const rel = path.relative(srcDir, srcFile).replace(/\\/g, '/');
         if (isEssential && shouldSkipEssentialFile(rel)) continue;
+        if (isDefaultOptionsRel(`${folder}/${rel}`)) continue;
         const destFile = path.join(destDir, rel.replace(/\//g, path.sep));
         fs.mkdirSync(path.dirname(destFile), { recursive: true });
         fs.copyFileSync(srcFile, destFile);
@@ -1219,7 +1278,7 @@ function registerIpc() {
       const check = await checkAuth();
       return { success: true, token, user: check.user ?? null };
     } catch (e: any) {
-      return { success: false, error: e?.message || String(e) };
+      return { success: false, error: describeGitHubError(e) };
     }
   });
 
@@ -1228,7 +1287,7 @@ function registerIpc() {
       authLogout();
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: e?.message || String(e) };
+      return { success: false, error: describeGitHubError(e) };
     }
   });
 
@@ -1237,7 +1296,7 @@ function registerIpc() {
       const result = await checkAuth();
       return { success: true, ...result };
     } catch (e: any) {
-      return { success: false, authenticated: false, error: e?.message || String(e) };
+      return { success: false, authenticated: false, error: describeGitHubError(e) };
     }
   });
 
@@ -1263,7 +1322,7 @@ function registerIpc() {
       if (!res.ok) return { success: false, error: `Discord returned HTTP ${res.status}` };
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      return { success: false, error: 'Could not reach Discord to test the webhook. Check your internet connection and try again.' };
     }
   });
 
@@ -1281,14 +1340,14 @@ function registerIpc() {
   ipcMain.handle('config:read', () => {
     try {
       return { success: true, data: yaml.load(fs.readFileSync(getConfigPath(), 'utf-8')) };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeFileError(e, 'Could not read the config file.') }; }
   });
 
   ipcMain.handle('config:write', (_e, data: Record<string, unknown>) => {
     try {
       fs.writeFileSync(getConfigPath(), yaml.dump(data, { lineWidth: -1 }), 'utf-8');
       return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeFileError(e, 'Could not save the config file.') }; }
   });
 
   ipcMain.handle('config:read-export-state', () => {
@@ -1297,7 +1356,7 @@ function registerIpc() {
       const p = path.join(root, '.last_export_state.json');
       if (!fs.existsSync(p)) return { success: true, data: null };
       return { success: true, data: JSON.parse(fs.readFileSync(p, 'utf-8')) };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeFileError(e, 'Could not read the last export state.') }; }
   });
 
   // GitHub
@@ -1318,7 +1377,7 @@ function registerIpc() {
     const oc = getOctokit();
     if (!oc) return { success: false, error: 'No token' };
     try { const { data } = await oc.users.getAuthenticated(); return { success: true, data }; }
-    catch (e: any) { return { success: false, error: e.message }; }
+    catch (e: any) { return { success: false, error: describeGitHubError(e) }; }
   });
 
   ipcMain.handle('github:get-commits', async (_e, { owner, repo, branch }: { owner: string; repo: string; branch: string }) => {
@@ -1327,7 +1386,7 @@ function registerIpc() {
     try {
       const { data } = await oc.repos.listCommits({ owner, repo, sha: branch, per_page: 20 });
       return { success: true, data };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeGitHubError(e) }; }
   });
 
   ipcMain.handle('github:get-commit-files', async (_e, { owner, repo, sha }: { owner: string; repo: string; sha: string }) => {
@@ -1361,7 +1420,7 @@ function registerIpc() {
       }
 
       return { success: true, data: { files: allFiles, modChanges, configChanged } };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeGitHubError(e) }; }
   });
 
   ipcMain.handle('github:get-issues', async (_e, {
@@ -1438,7 +1497,7 @@ function registerIpc() {
       }
       return { success: true, path: found?.path ?? null, driveRoot: found?.driveRoot ?? null };
     } catch (e: any) {
-      return { success: false, path: null, driveRoot: null, error: (e as Error).message };
+      return { success: false, path: null, driveRoot: null, error: describeFileError(e, 'Could not scan for your modpack folder.') };
     }
   });
 
@@ -1452,7 +1511,7 @@ function registerIpc() {
       const data = await scanAllLauncherProfiles();
       return { success: true, data };
     } catch (e: any) {
-      return { success: false, data: [], error: (e as Error).message };
+      return { success: false, data: [], error: describeFileError(e, 'Could not find your launcher profiles.') };
     }
   });
 
@@ -1484,7 +1543,7 @@ function registerIpc() {
       }
       return { success: true, data: { config, exportState } };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      return { success: false, error: describeFileError(e, 'Could not read the modpack info.') };
     }
   });
 
@@ -1500,7 +1559,7 @@ function registerIpc() {
       return { success: true };
     } catch (e: any) {
       console.error('[git:ensure-versions-repo] failed:', e);
-      return { success: false, error: e?.message || String(e) };
+      return { success: false, error: describeFileError(e, 'Could not set up the versions repository.') };
     }
   });
 
@@ -1924,6 +1983,7 @@ function registerIpc() {
           for (const srcFilePath of walkDir(srcDir)) {
             const relToOverrides = path.relative(overridesDir, srcFilePath);
             const stateKey = relToOverrides.replace(/\\/g, '/');
+            if (isDefaultOptionsRel(stateKey)) continue;
             const localFilePath = path.join(root, relToOverrides);
 
             let remoteHash: string;
@@ -2138,7 +2198,7 @@ function registerIpc() {
         changedFiles,
       };
     } catch (e: any) {
-      return { success: false, error: e?.message ?? String(e) };
+      return { success: false, error: describeFileError(e, 'Could not pull the latest changes.') };
     }
   });
 
@@ -2604,7 +2664,7 @@ function registerIpc() {
 
       return { success: true, version: newVersion, modsAdded, modsRemoved, removedMods, modsUnresolved, filesChanged, commit: pushedCommit };
     } catch (e: any) {
-      return { success: false, error: e?.message ?? String(e) };
+      return { success: false, error: describeFileError(e, 'Could not push your changes.') };
     }
   });
 
@@ -2622,23 +2682,27 @@ function registerIpc() {
         success: true,
         data: { branch, ahead: ahead || 0, behind: behind || 0, modified, lastPull: store.get('lastPullTime') || null },
       };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeFileError(e, 'Could not check the repository status.') }; }
   });
 
   ipcMain.handle('git:staged-files', async () => {
-    const root = store.get('modpackRoot') || DEV_APP_ROOT;
-    const targets = ['config.yaml', 'manifests', '.last_export_state.json'];
-    const result: string[] = [];
-    for (const t of targets) {
-      const p = path.join(root, t);
-      if (!fs.existsSync(p)) continue;
-      if (fs.statSync(p).isDirectory()) {
-        for (const f of fs.readdirSync(p)) result.push(`manifests/${f}`);
-      } else {
-        result.push(t);
+    try {
+      const root = store.get('modpackRoot') || DEV_APP_ROOT;
+      const targets = ['config.yaml', 'manifests', '.last_export_state.json'];
+      const result: string[] = [];
+      for (const t of targets) {
+        const p = path.join(root, t);
+        if (!fs.existsSync(p)) continue;
+        if (fs.statSync(p).isDirectory()) {
+          for (const f of fs.readdirSync(p)) result.push(`manifests/${f}`);
+        } else {
+          result.push(t);
+        }
       }
+      return { success: true, data: result };
+    } catch (e: any) {
+      return { success: false, data: [], error: describeFileError(e, 'Could not list your local files.') };
     }
-    return { success: true, data: result };
   });
 
   ipcMain.handle('git:commit-changes', async (_e, { sha }: { sha: string }) => {
@@ -2826,7 +2890,7 @@ function registerIpc() {
 
       return { success: true, data: { mods, otherFiles } };
     } catch (e: any) {
-      return { success: false, error: e?.message ?? String(e), data: { mods: [], otherFiles: [] } };
+      return { success: false, error: describeFileError(e, 'Could not list your staged changes.'), data: { mods: [], otherFiles: [] } };
     }
   });
 
@@ -2947,8 +3011,9 @@ function registerIpc() {
           for (const srcFile of walkDir(srcDir)) {
             const rel = path.relative(srcDir, srcFile).replace(/\\/g, '/');
             if (isEssential && shouldSkipEssentialFile(rel)) continue;
-            const destFile = path.join(destDir, rel.replace(/\//g, path.sep));
             const relFull = `${folder}/${rel}`;
+            if (isDefaultOptionsRel(relFull)) continue;
+            const destFile = path.join(destDir, rel.replace(/\//g, path.sep));
             if (!fs.existsSync(destFile)) {
               changedFiles.push({ path: relFull, status: 'added' });
             } else {
@@ -2963,6 +3028,7 @@ function registerIpc() {
           for (const destFile of walkDir(destDir)) {
             const rel = path.relative(destDir, destFile).replace(/\\/g, '/');
             if (isEssential && shouldSkipEssentialFile(rel)) continue;
+            if (isDefaultOptionsRel(`${folder}/${rel}`)) continue;
             if (!fs.existsSync(path.join(srcDir, rel.replace(/\//g, path.sep)))) {
               changedFiles.push({ path: `${folder}/${rel}`, status: 'removed' });
             }
@@ -2989,7 +3055,7 @@ function registerIpc() {
       return { success: true, addedMods, updatedMods, removedMods, changedFiles, unchangedCount, isFirstPush };
     } catch (e: any) {
       return {
-        success: false, error: e?.message ?? String(e),
+        success: false, error: describeFileError(e, 'Could not preview the push.'),
         addedMods: [], updatedMods: [], removedMods: [], changedFiles: [], unchangedCount: 0,
       };
     }
@@ -3114,6 +3180,7 @@ function registerIpc() {
         if (fs.existsSync(srcDir)) {
           for (const srcFile of walkDir(srcDir)) {
             const rel = path.relative(srcDir, srcFile);
+            if (isDefaultOptionsRel(`${folder}/${rel.replace(/\\/g, '/')}`)) continue;
             const destFile = path.join(destDir, rel);
             fs.mkdirSync(path.dirname(destFile), { recursive: true });
             try { fs.copyFileSync(srcFile, destFile); } catch {}
@@ -3124,6 +3191,7 @@ function registerIpc() {
         if (fs.existsSync(destDir)) {
           for (const destFile of walkDir(destDir)) {
             const rel = path.relative(destDir, destFile);
+            if (isDefaultOptionsRel(`${folder}/${rel.replace(/\\/g, '/')}`)) continue;
             if (!fs.existsSync(path.join(srcDir, rel))) {
               try { fs.unlinkSync(destFile); } catch {}
             }
@@ -3134,7 +3202,7 @@ function registerIpc() {
       sendProgress('done', 'Undo complete!', 100);
       return { success: true, message: 'Last push has been undone.' };
     } catch (e: any) {
-      return { success: false, error: e?.message ?? String(e) };
+      return { success: false, error: describeFileError(e, 'Could not undo the last push.') };
     }
   });
 
@@ -3176,7 +3244,7 @@ function registerIpc() {
         }
       }
       return result;
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) { return { success: false, error: describeFileError(e, 'Could not run the export.') }; }
   });
 
   // ── Export .mrpack (pure Node) ────────────────────────────────────────────
@@ -3210,7 +3278,7 @@ function registerIpc() {
       const versionId = parseInt(manifest.versionId, 10);
       return { success: true, versionId: isNaN(versionId) ? null : versionId };
     } catch (e: any) {
-      return { success: false, versionId: null, error: e.message };
+      return { success: false, versionId: null, error: describeFileError(e, 'Could not read the published version.') };
     }
   });
 
@@ -3321,7 +3389,7 @@ function registerIpc() {
           sendP('autopush', 'Auto-push complete', 20);
         }
       } catch (e: any) {
-        return { success: false, error: `Auto-push failed: ${e?.message ?? String(e)}` };
+        return { success: false, error: describeFileError(e, 'Could not auto-push your changes before generating the changelog.') };
       }
     }
 
@@ -3351,7 +3419,7 @@ function registerIpc() {
 
     let manifest: any;
     try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); }
-    catch (e: any) { return { success: false, error: `Could not read manifest: ${e.message}` }; }
+    catch (e: any) { return { success: false, error: describeFileError(e, 'Could not read the manifest file.') }; }
 
     const cache = loadModrinthCache(versionsDir);
 
@@ -3544,7 +3612,12 @@ function registerIpc() {
       if (!fs.existsSync(srcDir)) continue;
       for (const file of walkDir(srcDir)) {
         const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
-        currHashes[rel] = `sha256:${computeSha256(file)}`;
+        if (isDefaultOptionsRel(rel)) continue;
+        try {
+          currHashes[rel] = `sha256:${computeSha256(file)}`;
+        } catch (hashErr: any) {
+          console.warn('[changelog] could not hash override file for diff:', rel, hashErr?.message || hashErr);
+        }
       }
     }
 
@@ -3642,7 +3715,7 @@ function registerIpc() {
       manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
       if (manifest.formatVersion !== 1 || !Array.isArray(manifest.files)) throw new Error('Unexpected manifest format');
     } catch (e: any) {
-      return { success: false, error: `Failed to read manifest: ${e.message}` };
+      return { success: false, error: describeFileError(e, 'Could not read the manifest file.') };
     }
 
     // ── Save release snapshot + changelog and commit ───────────────────────────
@@ -3665,7 +3738,11 @@ function registerIpc() {
           if (!fs.existsSync(srcDir)) continue;
           for (const file of walkDir(srcDir)) {
             const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
-            overrideHashes[rel] = `sha256:${computeSha256(file)}`;
+            try {
+              overrideHashes[rel] = `sha256:${computeSha256(file)}`;
+            } catch (hashErr: any) {
+              console.warn('[export] could not hash override file for snapshot:', rel, hashErr?.message || hashErr);
+            }
           }
         }
 
@@ -3732,7 +3809,7 @@ function registerIpc() {
         for (const file of walkDir(srcDir)) {
           const rel = path.relative(overridesDir, file).replace(/\\/g, '/');
           if (!includeFancyMenu && rel.startsWith('config/fancymenu/')) continue;
-          if (!includeDefaultOptions && rel.startsWith('config/defaultoptions/')) continue;
+          if (rel.startsWith('config/defaultoptions/')) continue;
           zip.addFile(`overrides/${rel}`, fs.readFileSync(file));
         }
       }
@@ -3741,6 +3818,24 @@ function registerIpc() {
         const srcFile = path.join(overridesDir, filename);
         if (fs.existsSync(srcFile)) {
           zip.addFile(`overrides/${filename}`, fs.readFileSync(srcFile));
+        }
+      }
+
+      // Curated Default Options — defaults/ in the versions repo is the only
+      // source for config/defaultoptions/ in the zip (personal synced copies
+      // are skipped above). If defaults/ is empty, export proceeds without them.
+      if (includeDefaultOptions) {
+        const defaultsDir = path.join(versionsDir, 'defaults');
+        const curated: string[] = [];
+        for (const fileName of Object.values(DEFAULT_OPTIONS_FILES)) {
+          if (fs.existsSync(path.join(defaultsDir, fileName))) curated.push(fileName);
+        }
+        if (curated.length === 0) {
+          console.warn('[export] no curated default options found in defaults/ — exporting without default options');
+        } else {
+          for (const fileName of curated) {
+            zip.addFile(`overrides/config/defaultoptions/${fileName}`, fs.readFileSync(path.join(defaultsDir, fileName)));
+          }
         }
       }
 
@@ -3793,7 +3888,7 @@ function registerIpc() {
       sendP('done', 'Export complete!', 100);
       return { success: true, path: outputPath, size };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      return { success: false, error: describeFileError(e, 'Could not create the .mrpack file.') };
     }
   });
 
@@ -3816,9 +3911,9 @@ function registerIpc() {
 
     const task = (async (): Promise<ModIconResult> => {
       const cacheDir = path.join(app.getPath('userData'), 'cache', 'mod-icons');
-      await fs.promises.mkdir(cacheDir, { recursive: true });
       const UA = { 'User-Agent': 'ORB-Modpack-Exporter/1.0' };
       try {
+        await fs.promises.mkdir(cacheDir, { recursive: true });
         const cachedPath = path.join(cacheDir, `${slug}.png`);
         if (fs.existsSync(cachedPath)) {
           const data = fs.readFileSync(cachedPath);
@@ -3890,7 +3985,12 @@ function registerIpc() {
   });
 
   ipcMain.handle('profile:set-mode', async (_e, { mode }: { mode: string }) => {
-    setProfileMode(app.getPath('userData'), mode as ProfileMode);
+    try {
+      setProfileMode(app.getPath('userData'), mode as ProfileMode);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: describeFileError(e, 'Could not switch the profile mode.') };
+    }
   });
 
   ipcMain.handle('profile:promote', async () => {
@@ -3900,7 +4000,7 @@ function registerIpc() {
       const result = promoteToProduction(app.getPath('userData'), root);
       return result;
     } catch (e: any) {
-      return { success: false, error: e?.message };
+      return { success: false, error: describeFileError(e, 'Could not switch to production mode.') };
     }
   });
 
@@ -3908,54 +4008,169 @@ function registerIpc() {
     const root = store.get('modpackRoot');
     if (!root) return { success: false, error: 'Modpack root not set' };
 
-    const prodDir = productionWorkspacePath(app.getPath('userData'));
+    try {
+      const prodDir = productionWorkspacePath(app.getPath('userData'));
 
-    interface DiffEntry {
-      type: 'added' | 'removed' | 'changed';
-      path: string;
-      devSize?: number;
-      prodSize?: number;
-    }
-
-    const devFiles = new Map<string, { size: number; mtime: number }>();
-    const prodFiles = new Map<string, { size: number; mtime: number }>();
-
-    for (const fp of walkDir(root)) {
-      const rel = path.relative(root, fp).replace(/\\/g, '/');
-      if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
-      try {
-        const st = fs.statSync(fp);
-        devFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
-      } catch {}
-    }
-
-    for (const fp of walkDir(prodDir)) {
-      const rel = path.relative(prodDir, fp).replace(/\\/g, '/');
-      if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
-      try {
-        const st = fs.statSync(fp);
-        prodFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
-      } catch {}
-    }
-
-    const diff: DiffEntry[] = [];
-
-    for (const [rel, devInfo] of devFiles) {
-      const prodInfo = prodFiles.get(rel);
-      if (!prodInfo) {
-        diff.push({ type: 'added', path: rel, devSize: devInfo.size });
-      } else if (devInfo.size !== prodInfo.size || devInfo.mtime !== prodInfo.mtime) {
-        diff.push({ type: 'changed', path: rel, devSize: devInfo.size, prodSize: prodInfo.size });
+      interface DiffEntry {
+        type: 'added' | 'removed' | 'changed';
+        path: string;
+        devSize?: number;
+        prodSize?: number;
       }
-    }
 
-    for (const [rel, prodInfo] of prodFiles) {
-      if (!devFiles.has(rel)) {
-        diff.push({ type: 'removed', path: rel, prodSize: prodInfo.size });
+      const devFiles = new Map<string, { size: number; mtime: number }>();
+      const prodFiles = new Map<string, { size: number; mtime: number }>();
+
+      for (const fp of walkDir(root)) {
+        const rel = path.relative(root, fp).replace(/\\/g, '/');
+        if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
+        try {
+          const st = fs.statSync(fp);
+          devFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
+        } catch {}
       }
+
+      for (const fp of walkDir(prodDir)) {
+        const rel = path.relative(prodDir, fp).replace(/\\/g, '/');
+        if (rel.startsWith('mods/') && rel.endsWith('.jar')) continue;
+        try {
+          const st = fs.statSync(fp);
+          prodFiles.set(rel, { size: st.size, mtime: st.mtimeMs });
+        } catch {}
+      }
+
+      const diff: DiffEntry[] = [];
+
+      for (const [rel, devInfo] of devFiles) {
+        const prodInfo = prodFiles.get(rel);
+        if (!prodInfo) {
+          diff.push({ type: 'added', path: rel, devSize: devInfo.size });
+        } else if (devInfo.size !== prodInfo.size || devInfo.mtime !== prodInfo.mtime) {
+          diff.push({ type: 'changed', path: rel, devSize: devInfo.size, prodSize: prodInfo.size });
+        }
+      }
+
+      for (const [rel, prodInfo] of prodFiles) {
+        if (!devFiles.has(rel)) {
+          diff.push({ type: 'removed', path: rel, prodSize: prodInfo.size });
+        }
+      }
+
+      return { success: true, data: diff };
+    } catch (e: any) {
+      return { success: false, data: [], error: describeFileError(e, 'Could not preview the workspace changes.') };
+    }
+  });
+
+  // ── Default Options ─────────────────────────────────────────────────────────
+  ipcMain.handle('defaults:get-state', async () => {
+    const emptyState = (): Record<DefaultOptionsFileType, DefaultFileState> => ({
+      options: { exists: false, localExists: false },
+      keybindings: { exists: false, localExists: false },
+      servers: { exists: false, localExists: false },
+    });
+    try {
+      const versionsDir = getVersionsRepoDir();
+      const defaultsDir = path.join(versionsDir, 'defaults');
+      const root = store.get('modpackRoot') as string | undefined;
+      const state = emptyState();
+      if (fs.existsSync(defaultsDir)) {
+        for (const [fileType, fileName] of Object.entries(DEFAULT_OPTIONS_FILES) as [DefaultOptionsFileType, string][]) {
+          const fp = path.join(defaultsDir, fileName);
+          if (fs.existsSync(fp)) {
+            const st = fs.statSync(fp);
+            state[fileType] = { exists: true, localExists: false, size: st.size, modified: st.mtime.toISOString(), sha256: computeSha256(fp) };
+          }
+        }
+      }
+      if (root) {
+        for (const [fileType, fileName] of Object.entries(DEFAULT_OPTIONS_FILES) as [DefaultOptionsFileType, string][]) {
+          const fp = path.join(root, 'config', 'defaultoptions', fileName);
+          if (fs.existsSync(fp)) {
+            const st = fs.statSync(fp);
+            state[fileType] = {
+              ...state[fileType],
+              localExists: true,
+              localSize: st.size,
+              localModified: st.mtime.toISOString(),
+              localSha256: computeSha256(fp),
+            };
+          }
+        }
+      }
+      return state;
+    } catch (e: any) {
+      console.warn('[defaults] get-state failed:', describeFileError(e, 'Could not read the default options state.'));
+      return emptyState();
+    }
+  });
+
+  ipcMain.handle('defaults:import', async (_e, { fileType }: { fileType: DefaultOptionsFileType }) => {
+    const fileName = DEFAULT_OPTIONS_FILES[fileType];
+    if (!fileName) return { success: false, error: `Unknown default options file type: ${fileType}` };
+
+    const root = store.get('modpackRoot');
+    if (!root) return { success: false, error: 'No modpack root configured.' };
+
+    const srcFile = path.join(root, 'config', 'defaultoptions', fileName);
+    if (!fs.existsSync(srcFile)) {
+      return { success: false, error: 'File not found. Run /defaultoptions saveAll in-game first.' };
     }
 
-    return { success: true, data: diff };
+    const versionsDir = getVersionsRepoDir();
+    const token = getToken();
+    try {
+      await ensureVersionsRepo(versionsDir, token);
+    } catch (e: any) {
+      return { success: false, error: describeFileError(e, 'Could not sync the versions repository.') };
+    }
+
+    let githubUser = 'orbmodpack';
+    try {
+      const oc = getOctokit();
+      if (oc) { const { data } = await oc.users.getAuthenticated(); githubUser = data.login; }
+    } catch {}
+
+    try {
+      await ensureGitIdentity(versionsDir, githubUser);
+
+      const defaultsDir = path.join(versionsDir, 'defaults');
+      fs.mkdirSync(defaultsDir, { recursive: true });
+      const destFile = path.join(defaultsDir, fileName);
+      fs.copyFileSync(srcFile, destFile);
+
+      await gitProvider.add(versionsDir, `defaults/${fileName}`);
+      const matrix = await gitProvider.statusMatrix(versionsDir);
+      const hasChanges = matrix.some(r => r.stage !== 0);
+      if (hasChanges) {
+        await gitProvider.commit(versionsDir, `Import default ${fileType}`);
+        try {
+          await gitProvider.push(versionsDir, { ...makeGitAuth() });
+        } catch (pushErr: any) {
+          if (pushErr.message.includes('no upstream') || pushErr.message.includes('has no upstream')) {
+            await gitProvider.push(versionsDir, { ...makeGitAuth() });
+          } else {
+            throw pushErr;
+          }
+        }
+      }
+
+      // Local source is deleted only after commit+push succeeded; if the file
+      // was already identical (no changes), it was published by an earlier
+      // import, so removing the local copy is still safe.
+      try {
+        fs.unlinkSync(srcFile);
+      } catch (unlinkErr: any) {
+        console.warn('[defaults] could not delete local source after import:', unlinkErr?.message || unlinkErr);
+      }
+
+      const st = fs.statSync(destFile);
+      console.log(`[defaults] imported ${fileName} (${st.size} bytes)`);
+      return { success: true, fileName, size: st.size };
+    } catch (e: any) {
+      console.warn('[defaults] import failed:', e?.message || e);
+      return { success: false, error: describeFileError(e, 'Could not import the default options file.') };
+    }
   });
 }
 

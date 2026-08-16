@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { AppConfig, Issue, SyncStatus, ProfileMode } from '../../types';
 import Button from '../base/Button';
+import Card from '../base/Card';
 import ModeToggle from '../base/ModeToggle';
 import { timeAgo } from '../../utils/format';
 
@@ -50,7 +51,7 @@ export default function Sidebar({
       style={{ width: 296 }}
     >
       {/* Modpack Info */}
-      <div className="rounded-[12px] p-3 bg-card">
+      <Card className="p-3">
         <h3 className="text-foreground font-semibold text-xs uppercase tracking-wide mb-2">Modpack Info</h3>
         <div className="flex flex-col gap-2">
           {config ? (
@@ -73,10 +74,10 @@ export default function Sidebar({
             <p className="text-muted text-xs">No config loaded</p>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Team Sync */}
-      <div className="rounded-[12px] p-3 bg-card">
+      <Card className="p-3">
         <h3 className="text-foreground font-semibold text-xs uppercase tracking-wide mb-2">Team Sync</h3>
         <div className="flex flex-col gap-1.5 mb-3">
           {syncStatus.branch && (
@@ -139,7 +140,7 @@ export default function Sidebar({
             {isUndoingLastPush ? 'Undoing…' : 'Undo last push'}
           </Button>
         </div>
-      </div>
+      </Card>
 
       {/* Export */}
       <Button
@@ -153,7 +154,7 @@ export default function Sidebar({
       </Button>
 
       {/* Bugs */}
-      <div className="rounded-[12px] p-3 bg-card">
+      <Card className="p-3">
         <h3 className="text-foreground font-semibold text-xs uppercase tracking-wide mb-2">Bugs</h3>
         {issues.length === 0 ? (
           <p className="text-muted text-xs">No open issues</p>
@@ -196,7 +197,7 @@ export default function Sidebar({
           <Bug size={12} />
           Report a Bug
         </button>
-      </div>
+      </Card>
     </div>
   );
 }

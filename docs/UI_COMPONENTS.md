@@ -134,7 +134,19 @@ Two different surfaces over largely the same settings, both built around
   on-launch toggle, profile protection (snapshot/restore/promote, dev vs. prod), Discord webhook
   (with a test-send button), Modrinth project ID, and Minecraft/Fabric Loader version fields. Uses
   two `ConfirmDialog`s (restore confirmation, promote confirmation showing a computed diff via
-  `profile.promotePreview()`).
+  `profile.promotePreview()`). The **Default Options** card (in the Modpack category) lists the
+  three curated Default Options files (`options.txt`, `keybindings.txt`, `servers.dat`). The card
+  is hidden entirely unless at least one file has a local or published copy. Each row shows a
+  `Badge` with three states — "Same as published" (`info`, local and published copies are
+  byte-identical via sha256, no Import button), "Ready to import" (`warning`, local copy exists,
+  Import button shown) vs "Imported" (`success`, published only, no Import button) — plus the
+  published file size + last-modified time, prefixed with "Current:" when both a local and a
+  published copy exist. Importing a file that already has a published copy opens a `ConfirmDialog`;
+  when the local copy is byte-identical to the published one (same sha256) the dialog says
+  "Already published" and warns that only the local copy will be removed (confirm label "Discard
+  local copy"), otherwise it shows "Replace default" with existing vs. new size/time
+  (Replace/Cancel). Driven by `window.electron.defaults.getState()` (on mount) and
+  `defaults.import(fileType)` (per-file, with a loading spinner on the button and toast feedback).
 
 Both embed `SettingsModal/ProfileSelector.tsx` — scans all installed launchers (Modrinth, Prism,
 MultiMC, ATLauncher, CurseForge, GDLauncher) via `modpack.listProfiles()`, lets the user

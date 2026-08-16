@@ -16,6 +16,27 @@ For the full step-by-step algorithm behind `git:push`, `git:pull`, `git:undo-las
 `export:generate-changelog`, and `export:mrpack`, see [PUSH_PULL_FLOW.md](./PUSH_PULL_FLOW.md) —
 this document gives the channel contract, not the internal steps.
 
+### Error message policy
+
+Every handler that touches the filesystem, the versions repo, or GitHub translates exceptions
+into a human-readable `error` string before returning `{ success: false, ... }` — never a raw
+stack/`message`. Main-process helpers:
+
+- `describeFileError(e, fallback)` (`src/main/index.ts`) — maps Node `fs`/`path` error codes
+  (`ENOENT`, `EACCES`/`EPERM`, `EISDIR`, `ENOTDIR`, `ENOSPC`, `EBUSY`, `EEXIST`, `EROFS`,
+  `ENAMETOOLONG`, `EMFILE`, `ENOTEMPTY`) and common `isomorphic-git` messages (no upstream,
+  fetch-first/non-fast-forward/rejected, auth/401/403/login/token) to plain-language text.
+  Unmapped errors fall back to `fallback` (keeping the raw message only as a last resort).
+- `describeGitHubError(e)` (`src/main/index.ts`) — flags GitHub API rate limits
+  ("try again in a few minutes") and 401s ("sign out and sign in again"), otherwise falls back
+  to `e.message`.
+- Non-fatal side steps (e.g. snapshot git push inside `export:mrpack`, per-file hashing in
+  `export:generate-changelog`) log via `console.warn` with the file path and skip that item
+  instead of failing the whole operation.
+
+Network-only helpers (`settings:test-webhook`, `export:latest-modrinth-version`) return their own
+fixed, user-friendly strings for fetch failures.
+
 ## Progress / event channels (main → renderer)
 
 These are pushed via `mainWindow?.webContents.send(...)` (or `event.sender.send(...)` for the
@@ -165,7 +186,7 @@ call into `src/main/export/` vs. reimplement their own logic in `index.ts`.
 | `export:manifest-version` | `export.manifestVersion()` | — | `{ success: true, versionId: number \| null } \| { success: false, versionId: null, error }` |
 | `export:save-dialog` | `export.saveDialog({defaultPath})` | `{ defaultPath?: string }` | `string \| null` (chosen file path) |
 | `export:generate-changelog` | `export.generateChangelog({version})` | `{ version: string }` | `{ success: true, type: 'initial'\|'diff'\|'no_changes', snapshotExists, diff, markdown, warning?, note? } \| { success: false, error }` |
-| `export:mrpack` | `export.mrpack({outputPath, version, changelog?, overwriteSnapshot?})` | `{ outputPath: string, version: string, changelog?: string, overwriteSnapshot?: boolean }` | `{ success: true, path, size } \| { success: false, error }` |
+| `export:mrpack` | `export.mrpack({outputPath, version, changelog?, overwriteSnapshot?, includeFancyMenu?, includeDefaultOptions?})` | `{ outputPath: string, version: string, changelog?: string, overwriteSnapshot?: boolean, includeFancyMenu?: boolean, includeDefaultOptions?: boolean }` | `{ success: true, path, size, published?, publishedVersionId? } \| { success: false, error }` |
 
 `export:generate-changelog` and `export:mrpack` both stream `export:progress` events.
 `export:generate-changelog` also performs an **auto-push** of any local mod changes as its first
@@ -245,6 +266,26 @@ protection card).
 | `modrinth:get-icons` | `modrinth.getIcons(slugs)` | `slugs: string[]` (raw array) | `Record<slug, string \| null>` — `data:image/png;base64,...` URIs, disk-cached under `<userData>/cache/mod-icons/<slug>.png`; no success/error wrapper |
 
 Called from: `ActivityFeed/ActivityCard.tsx` (mod icons on commit cards).
+
+## Default Options (`defaults:*`)
+
+Curated Default Options files (Twelve Iterations mod) — see STORAGE_MODEL.md's `defaults/`
+section for the full data-flow contract. Files live in `<versions-repo>/defaults/` and are the
+only source for `overrides/config/defaultoptions/` in exported `.mrpack` files.
+
+| Channel | Preload method | Payload | Returns |
+|---|---|---|---|
+| `defaults:get-state` | `defaults.getState()` | — | `DefaultOptionsState` — `Record<'options'\|'keybindings'\|'servers', { exists: boolean, localExists: boolean, size?, modified?, localSize?, localModified?, sha256?, localSha256? }>` (raw, no success/error wrapper) |
+| `defaults:import` | `defaults.import(fileType)` | `{ fileType: 'options'\|'keybindings'\|'servers' }` | `{ success: true, fileName, size } \| { success: false, error }` |
+
+`defaults:import` reads `<modpackRoot>/config/defaultoptions/<file>`, ensures the versions repo
+is up to date (`ensureVersionsRepo`), copies the file into `<versions-repo>/defaults/`, and
+commits + pushes it. The local source file is deleted **only after** commit + push succeed; if
+the push fails, nothing is deleted and the error is returned. If the source file is missing it
+returns an error telling the user to run `/defaultoptions saveAll` in a singleplayer world first.
+
+Called from: `SettingsPage/index.tsx` (the "Default Options" card in the Modpack category —
+loads state on mount via `getState`, imports per-file via `import`).
 
 ## Legacy sync bridge (`python:*`)
 

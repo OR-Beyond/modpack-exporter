@@ -1,30 +1,34 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Copy, Check, Trash2, AlertTriangle, Info, XCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Copy, Check, Trash2, AlertTriangle, Info, Search, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Button from '../base/Button';
+import Badge, { type BadgeTone } from '../base/Badge';
+import Input from '../base/Input';
+import ExpandableText from '../base/ExpandableText';
 import {
   getLogs, clearLogs, subscribe, formatLogsForClipboard, type LogEntry,
 } from '../../utils/logger';
 import type { LogLevel } from '../../types';
 
-const TAG_COLORS: Record<string, string> = {
-  'main': '#58a6ff',
-  'updater': '#bc8cff',
-  'scan': '#f0883e',
-  'git:pull': '#3fb950',
-  'git:ensure-versions-repo': '#3fb950',
-  'git': '#3fb950',
-  'pull': '#3fb950',
-  'push': '#d29922',
-  'undo-push': '#f85149',
-  'discord': '#5865f2',
-  'changelog': '#79c0ff',
-  'export': '#ffa657',
-  'modrinth-cache': '#ffa657',
-  'pull-state': '#8b949e',
+// Context tags are freeform text inside the message — no structured
+// categorization. Map known tags (exact match first, prefix fallback) to
+// semantic Badge tones so they read consistently with the rest of the app.
+const TAG_TONES: Record<string, BadgeTone> = {
+  'main': 'info',
+  'updater': 'info',
+  'scan': 'warning',
+  'git:pull': 'success',
+  'git:ensure-versions-repo': 'success',
+  'git': 'success',
+  'pull': 'success',
+  'push': 'warning',
+  'undo-push': 'danger',
+  'discord': 'info',
+  'changelog': 'info',
+  'export': 'warning',
+  'modrinth-cache': 'warning',
+  'pull-state': 'neutral',
 };
-
-const DEFAULT_TAG_COLOR = '#8b949e';
 
 // `all` shows everything; info/warn/error show that severity and above.
 const FILTERS: { value: 'all' | LogLevel; label: string }[] = [
@@ -42,35 +46,12 @@ function parseTag(message: string): { tag: string | null; rest: string } {
   return { tag: null, rest: message };
 }
 
-function tagColor(tag: string): string {
-  if (TAG_COLORS[tag]) return TAG_COLORS[tag];
-  for (const [prefix, color] of Object.entries(TAG_COLORS)) {
-    if (tag.startsWith(prefix)) return color;
+function tagTone(tag: string): BadgeTone {
+  if (TAG_TONES[tag]) return TAG_TONES[tag];
+  for (const [prefix, tone] of Object.entries(TAG_TONES)) {
+    if (tag.startsWith(prefix)) return tone;
   }
-  return DEFAULT_TAG_COLOR;
-}
-
-function formatMessage(message: string): React.ReactNode {
-  const { tag, rest } = parseTag(message);
-  if (!tag) {
-    return <span>{message}</span>;
-  }
-  const color = tagColor(tag);
-  return (
-    <>
-      <span
-        className="font-mono rounded px-1 py-0.5 text-[11px] font-semibold flex-shrink-0"
-        style={{
-          color,
-          background: `${color}18`,
-          border: `1px solid ${color}30`,
-        }}
-      >
-        {tag}
-      </span>
-      <span className="text-inherit">{rest}</span>
-    </>
-  );
+  return 'neutral';
 }
 
 function LogIcon({ level }: { level: LogEntry['level'] }) {
@@ -111,6 +92,7 @@ function levelTextClass(level: LogEntry['level']): string {
 export default function LogsPage() {
   const [, forceUpdate] = useState(0);
   const [filter, setFilter] = useState<'all' | LogLevel>('all');
+  const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -118,15 +100,19 @@ export default function LogsPage() {
   useEffect(() => subscribe(() => forceUpdate(n => n + 1)), []);
 
   const logs = getLogs();
-  const visibleLogs =
-    filter === 'all' ? logs : logs.filter(e => SEVERITY[e.level] >= SEVERITY[filter]);
+  const query = search.trim().toLowerCase();
+  const visibleLogs = logs.filter(
+    e =>
+      (filter === 'all' || SEVERITY[e.level] >= SEVERITY[filter]) &&
+      (!query || e.message.toLowerCase().includes(query)),
+  );
 
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to bottom when new logs arrive.
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [visibleLogs.length]);
+  }, [logs.length]);
 
   const handleCopy = async () => {
     try {
@@ -147,22 +133,7 @@ export default function LogsPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-line/6 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <h2 className="text-foreground font-semibold text-base">Logs</h2>
-          <div className="flex items-center gap-0.5">
-            {FILTERS.map(f => (
-              <button
-                key={f.value}
-                onClick={() => setFilter(f.value)}
-                className={`px-2.5 py-1 rounded-[6px] text-xs font-medium transition-colors whitespace-nowrap ${
-                  filter === f.value ? 'bg-line/8 text-foreground' : 'text-muted hover:bg-line/4'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <h2 className="text-foreground font-semibold text-base">Logs</h2>
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
@@ -185,6 +156,37 @@ export default function LogsPage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-3 px-6 py-2.5 border-b border-line/6 flex-shrink-0">
+        <div className="flex items-center gap-0.5">
+          {FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFilter(f.value)}
+              className={`px-2.5 py-1 rounded-[6px] text-xs font-medium transition-colors whitespace-nowrap ${
+                filter === f.value ? 'bg-line/8 text-foreground' : 'text-muted hover:bg-line/4'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <div className="relative w-64">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <Input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search logs…"
+            aria-label="Search logs"
+            className="pl-9 h-8 py-1.5 text-xs"
+          />
+        </div>
+      </div>
+
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 font-mono">
         {logs.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -196,23 +198,26 @@ export default function LogsPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {visibleLogs.map(entry => (
-              <div
-                key={`${entry.source}-${entry.id}`}
-                className={`flex items-start gap-2 px-3 py-1.5 rounded-[6px] text-xs leading-relaxed ${levelClass(entry.level)}`}
-              >
-                <LogIcon level={entry.level} />
-                <span className="text-muted-foreground flex-shrink-0 w-20 select-none">
-                  {entry.timestamp}
-                </span>
-                <span
-                  className={`${levelTextClass(entry.level)} flex-1 min-w-0`}
-                  style={{ wordBreak: 'break-word', display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}
+            {visibleLogs.map(entry => {
+              const { tag, rest } = parseTag(entry.message);
+              return (
+                <div
+                  key={`${entry.source}-${entry.id}`}
+                  className={`flex items-start gap-1.5 px-3 py-2 rounded-[8px] text-xs leading-relaxed ${levelClass(entry.level)}`}
                 >
-                  {formatMessage(entry.message)}
-                </span>
-              </div>
-            ))}
+                  <LogIcon level={entry.level} />
+                  <span className="text-muted-foreground w-20 flex-shrink-0 select-none tabular-nums">
+                    {entry.timestamp}
+                  </span>
+                  <span
+                    className={`${levelTextClass(entry.level)} flex-1 min-w-0 flex flex-wrap items-baseline gap-x-1.5 gap-y-1`}
+                  >
+                    {tag && <Badge tone={tagTone(tag)}>{tag}</Badge>}
+                    <ExpandableText text={tag ? rest : entry.message} lines={3} />
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

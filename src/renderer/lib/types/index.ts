@@ -294,6 +294,28 @@ export interface LogEntry {
   source: 'main' | 'renderer';
 }
 
+export type DefaultFileType = 'options' | 'keybindings' | 'servers';
+
+export interface DefaultFileState {
+  exists: boolean;
+  localExists: boolean;
+  size?: number;
+  modified?: string;
+  localSize?: number;
+  localModified?: string;
+  sha256?: string;
+  localSha256?: string;
+}
+
+export type DefaultOptionsState = Record<DefaultFileType, DefaultFileState>;
+
+export interface DefaultImportResult {
+  success: boolean;
+  fileName?: string;
+  size?: number;
+  error?: string;
+}
+
 declare global {
   interface Window {
     electron: {
@@ -366,6 +388,10 @@ declare global {
       modrinth: {
         getIcons: (slugs: string[]) => Promise<Record<string, ModIconResult>>;
       };
+      defaults: {
+        getState: () => Promise<DefaultOptionsState>;
+        import: (fileType: DefaultFileType) => Promise<DefaultImportResult>;
+      };
       logs: {
         get: () => Promise<{ success: boolean; data?: LogEntry[]; error?: string }>;
         clear: () => Promise<{ success: boolean; error?: string }>;
@@ -374,7 +400,7 @@ declare global {
       };
       profile: {
         getMode: () => Promise<ProfileMode>;
-        setMode: (mode: ProfileMode) => Promise<void>;
+        setMode: (mode: ProfileMode) => Promise<{ success: boolean; error?: string }>;
         promote: () => Promise<{ success: boolean; copiedMods?: number; copiedFiles?: number; error?: string }>;
         promotePreview: () => Promise<{ success: boolean; data?: PromoteDiffEntry[]; error?: string }>;
       };

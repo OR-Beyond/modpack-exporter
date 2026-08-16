@@ -2,6 +2,7 @@ import React from 'react';
 import { GitCommit, History, KeyRound, RefreshCw } from 'lucide-react';
 import ActivityCard from './ActivityCard';
 import Button from '../base/Button';
+import Card from '../base/Card';
 import type { CommitCard } from '../../types';
 
 interface Props {
@@ -21,7 +22,7 @@ interface Props {
 
 function SkeletonCard() {
   return (
-    <div className="rounded-[12px] p-4 animate-pulse bg-card border border-line/6">
+    <Card className="p-4 animate-pulse">
       <div className="flex items-start gap-3">
         <div className="w-8 h-8 rounded-full flex-shrink-0 bg-line/6" />
         <div className="flex-1 min-w-0">
@@ -36,7 +37,7 @@ function SkeletonCard() {
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -57,7 +58,7 @@ export default function ActivityFeed({
       {/* Header row: title + view all + refresh */}
       {showHeader && (
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-foreground font-semibold text-[15px]">Activity</h2>
+          <h2 className="text-foreground font-semibold text-base">Activity</h2>
           <div className="flex items-center gap-2">
             {onViewAll && (
               <Button variant="ghost" size="sm" icon={History} onClick={onViewAll}>

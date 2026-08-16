@@ -111,6 +111,48 @@ step) if the corresponding local file no longer exists.
   `OVERRIDE_FOLDERS` folder or `INCLUDE_FILES` list are never touched by sync at all; they simply
   aren't in scope.
 
+## `defaults/` (in `<versions-repo>`) — curated Default Options
+
+The [Twelve Iterations](https://modrinth.com/mod/twelve-iterations) mod writes personal settings to
+`<modpackRoot>/config/defaultoptions/` (`options.txt`, `keybindings.txt`, `servers.dat`). These are
+the maintainer's **personal** copies and must never leak into exports. Instead, curated copies are
+imported explicitly into `<versions-repo>/defaults/` via the `defaults:import` handler, and only
+those are embedded into exported `.mrpack` files.
+
+```
+<versions-repo>/defaults/
+  options.txt
+  keybindings.txt
+  servers.dat
+```
+
+- **Write path** — `defaults:import` (in `src/main/index.ts`): validates the `fileType` against
+  `DEFAULT_OPTIONS_FILES`, resolves the source as `<modpackRoot>/config/defaultoptions/<file>`,
+  ensures the versions repo is up to date (`ensureVersionsRepo`), copies the file into
+  `<versions-repo>/defaults/`, and commits + pushes it (`Import default <fileType>`). The push
+  handler (`git:push`) and `syncOverridesToRepo` never touch `defaults/` — only the import flow
+  writes there. After commit + push succeed, the local source file is deleted (never deleted if
+  the push fails). If the source file is missing, the handler returns an error telling the user to
+  run `/defaultoptions saveAll` in a singleplayer world first.
+- **Sync exclusion** — `config/defaultoptions/` is excluded from the override sync itself, not just
+  from the export walk: `syncOverridesToRepo` (push), the `git:pull` overrides→local loop, the
+  push-preview change detection, the undo-last-push restore, and the export changelog hash diff
+  all skip it. Personal copies in `<modpackRoot>/config/defaultoptions/` never enter
+  `<versions-repo>/overrides/`; the only path into the repo is `defaults/` via `defaults:import`.
+- **Read path** — `export:mrpack`: `config/defaultoptions/` is always excluded from the synced
+  `overrides/` walk (personal copies never enter the zip raw); if the `includeDefaultOptions`
+  export option is on, any files present in `<versions-repo>/defaults/` are added to the zip under
+  `overrides/config/defaultoptions/`. If `defaults/` is empty, the export proceeds without default
+  options and logs a warning (visible in the Logs page).
+- **Status** — `defaults:get-state` reports per-file `{ exists, localExists, size?, modified?,
+  localSize?, localModified?, sha256?, localSha256? }` — `exists`/`size`/`modified`/`sha256`
+  describe the published copy in `<versions-repo>/defaults/`, `localExists`/`localSize`/
+  `localModified`/`localSha256` describe the personal copy at
+  `<modpackRoot>/config/defaultoptions/<file>`. When both exist and `sha256 === localSha256`
+  the file is identical to what's already published — the Settings UI shows a "Same as published"
+  badge and the import dialog warns instead of silently re-importing. Backs the Settings →
+  Default Options UI.
+
 ## `.last_pull_state.json` (gitignored, in `<versions-repo>`)
 
 ```ts
