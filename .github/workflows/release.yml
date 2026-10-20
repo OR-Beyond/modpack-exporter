@@ -68,10 +68,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
@@ -80,10 +84,10 @@ jobs:
           sudo apt-get install -y rpm
 
       - name: Build application
-        run: npm run build
+        run: bun run build
 
       - name: Build installers (no publish)
-        run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
+        run: bunx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
 
       - name: Sign Windows artifacts (SignPath, optional)
         if: runner.os == 'Windows'
@@ -157,7 +161,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npx tsc --noEmit
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bunx tsc --noEmit
