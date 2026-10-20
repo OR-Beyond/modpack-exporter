@@ -35,6 +35,36 @@ registerLogIpc();
 
 const gitProvider = new IsomorphicGitProvider();
 
+
+// ── Per-repo sync mutex (serializes pull/push per versions repo) ──────────────
+const syncLockChains = new Map<string, Promise<void>>();
+
+async function withSyncLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const release = await acquireSyncLock(key);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+async function acquireSyncLock(key: string): Promise<() => void> {
+  const prev = syncLockChains.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>(r => { release = r; });
+  syncLockChains.set(key, prev.then(() => next));
+  await prev;
+  return () => { release(); };
+}
+
+function validateProfileIdentity(selectedRoot: string, requestedRoot: string): { ok: boolean; error?: string } {
+  if (!requestedRoot) return { ok: false, error: 'No modpack root configured' };
+  if (requestedRoot !== selectedRoot) {
+    return { ok: false, error: 'Profile identity mismatch — aborting sync to prevent cross-profile contamination.' };
+  }
+  return { ok: true };
+}
+
 function makeGitAuth() {
   const token = getToken();
   if (!token) return {};
@@ -68,7 +98,13 @@ autoUpdater.autoInstallOnAppQuit = true;
 let updaterConfigured = false;
 let updateDownloaded = false;
 
+function isPortableBuild(): boolean {
+  // electron-builder's portable target sets this env var at runtime.
+  return !!process.env.PORTABLE_EXECUTABLE_FILE;
+}
+
 function configureAutoUpdater(): void {
+  if (isPortableBuild()) return;
   if (updaterConfigured) return;
   updaterConfigured = true;
 
@@ -93,7 +129,7 @@ function configureAutoUpdater(): void {
 }
 
 async function checkForUpdate(): Promise<UpdateCheckResult> {
-  if (!app.isPackaged) return { updateAvailable: false };
+  if (!app.isPackaged || isPortableBuild()) return { updateAvailable: false };
   configureAutoUpdater();
 
   try {
@@ -116,7 +152,7 @@ async function checkForUpdate(): Promise<UpdateCheckResult> {
 }
 
 async function installUpdate(_downloadUrl?: string): Promise<void> {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || isPortableBuild()) return;
   configureAutoUpdater();
 
   if (updateDownloaded) {
@@ -132,6 +168,7 @@ async function installUpdate(_downloadUrl?: string): Promise<void> {
  * confirmation, downloads and installs it. Never throws.
  */
 async function runLaunchUpdateCheck(): Promise<void> {
+  if (isPortableBuild()) return;
   const result = await checkForUpdate();
   if (!result.updateAvailable) return;
 
@@ -860,9 +897,11 @@ app.on('ready', () => {
   runStartupScan();
   // Check for updates on launch (silent — only prompts if an update is found).
   // No-ops gracefully when the network is unavailable.
-  runLaunchUpdateCheck().catch(err =>
-    console.warn('[updater] launch check failed:', err)
-  );
+  if (!isPortableBuild()) {
+    runLaunchUpdateCheck().catch(err =>
+      console.warn('[updater] launch check failed:', err)
+    );
+  }
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -1563,17 +1602,30 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('git:pull', async () => {
+  ipcMain.handle('git:pull', async (_e, identity?: { profileId?: string; profilePath?: string }) => {
     if (store.get('readOnlyMode')) {
       return { success: false, error: 'Cannot pull while read-only mode is enabled. Disable it in Settings first.' };
     }
 
-    const root = store.get('modpackRoot');
-    if (!root) return { success: false, error: 'No modpack root configured' };
+    // Identity guard: an explicitly supplied profile path must match the selected
+    // profile. Mismatch => abort, never touch the Git working tree.
+    const selectedRoot = store.get('modpackRoot');
+    const requestedRoot = identity?.profilePath ?? selectedRoot;
+    if (!requestedRoot) return { success: false, error: 'No modpack root configured' };
+    if (identity?.profilePath && identity.profilePath !== selectedRoot) {
+      console.error('[git:pull] profile identity mismatch: requested', identity.profilePath, '!= selected', selectedRoot);
+      return { success: false, error: 'Profile identity mismatch — aborting sync to prevent cross-profile contamination.' };
+    }
+    // Re-validate at execution time (guards against profile switch mid-flight).
+    if (store.get('modpackRoot') !== requestedRoot) {
+      return { success: false, error: 'Selected profile changed during sync — aborting.' };
+    }
 
     const versionsDir = getVersionsRepoDir();
-    const modsDir = path.join(root, 'mods');
-    const token = getToken();
+    return withSyncLock(versionsDir, async () => {
+      const root = requestedRoot;
+      const modsDir = path.join(root, 'mods');
+      const token = getToken();
 
     const sendProgress = (stage: string, msg: string, percent: number) => {
       mainWindow?.webContents.send('sync:progress', { stage, message: msg, percent });
@@ -2200,22 +2252,34 @@ function registerIpc() {
     } catch (e: any) {
       return { success: false, error: describeFileError(e, 'Could not pull the latest changes.') };
     }
+    });
   });
 
-  ipcMain.handle('git:push', async (_e, { message }: { message: string }) => {
+  ipcMain.handle('git:push', async (_e, { message, profile }: { message: string; profile?: { profileId?: string; profilePath?: string } }) => {
     if (store.get('readOnlyMode')) {
       return { success: false, error: 'Cannot push while read-only mode is enabled. Disable it in Settings first.' };
     }
 
-    const root = store.get('modpackRoot');
-    if (!root) return { success: false, error: 'No modpack root configured' };
+    const selectedRoot = store.get('modpackRoot');
+    const requestedRoot = profile?.profilePath ?? selectedRoot;
+    if (!requestedRoot) return { success: false, error: 'No modpack root configured' };
+    const v = validateProfileIdentity(selectedRoot, requestedRoot);
+    if (!v.ok) {
+      console.error('[git:push] profile identity mismatch: requested', requestedRoot, '!= selected', selectedRoot);
+      return { success: false, error: v.error! };
+    }
+    if (store.get('modpackRoot') !== requestedRoot) {
+      return { success: false, error: 'Selected profile changed during sync — aborting.' };
+    }
 
+    const root = requestedRoot;
     const modsDir = path.join(root, 'mods');
     if (!fs.existsSync(modsDir)) {
       return { success: false, error: `mods/ folder not found at: ${modsDir}` };
     }
 
     const versionsDir = getVersionsRepoDir();
+    const lockRelease = await acquireSyncLock(versionsDir);
     const token = getToken();
 
     const sendProgress = (stage: string, msg: string, percent: number) => {
@@ -2421,6 +2485,11 @@ function registerIpc() {
         const matrix = await gitProvider.statusMatrix(versionsDir);
         hasChanges = matrix.some(r => r.head !== r.workdir);
       } catch {}
+
+      // Identity guard: abort before touching the remote if the selected profile changed.
+      if (store.get('modpackRoot') !== root) {
+        return { success: false, error: 'Selected profile changed during sync — aborting before push.' };
+      }
 
       await gitProvider.addAll(versionsDir);
 
@@ -2665,6 +2734,8 @@ function registerIpc() {
       return { success: true, version: newVersion, modsAdded, modsRemoved, removedMods, modsUnresolved, filesChanged, commit: pushedCommit };
     } catch (e: any) {
       return { success: false, error: describeFileError(e, 'Could not push your changes.') };
+    } finally {
+      lockRelease();
     }
   });
 

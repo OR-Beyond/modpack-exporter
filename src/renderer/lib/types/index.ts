@@ -351,8 +351,8 @@ declare global {
       };
       git: {
         ensureVersionsRepo: () => Promise<{ success: boolean; error?: string }>;
-        pull: () => Promise<PullResult>;
-        push: (o: { message: string }) => Promise<PushResult>;
+        pull: (profile?: { profileId?: string; profilePath?: string }) => Promise<PullResult>;
+        push: (o: { message: string; profile?: { profileId?: string; profilePath?: string } }) => Promise<PushResult>;
         status: () => Promise<{ success: boolean; data?: SyncStatus; error?: string }>;
         stagedFiles: () => Promise<{ success: boolean; data?: string[] }>;
         commitChanges: (sha: string) => Promise<{ success: boolean; data?: CommitChanges; error?: string }>;

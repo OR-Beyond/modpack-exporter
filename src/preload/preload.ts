@@ -58,7 +58,7 @@ const api = {
   },
   git: {
     ensureVersionsRepo: () => ipcRenderer.invoke('git:ensure-versions-repo'),
-    pull: () => ipcRenderer.invoke('git:pull'),
+    pull: (profile?: { profileId?: string; profilePath?: string }) => ipcRenderer.invoke('git:pull', profile),
     push: (o: unknown) => ipcRenderer.invoke('git:push', o),
     status: () => ipcRenderer.invoke('git:status'),
     stagedFiles: () => ipcRenderer.invoke('git:staged-files'),

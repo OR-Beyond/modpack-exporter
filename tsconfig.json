@@ -8,7 +8,6 @@
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "lib": ["ESNext", "DOM"],
-    "jsx": "react-jsx",
     "paths": { "@/*": ["./src/renderer/*"] }
   },
   "include": ["src", "vite.*.ts", "vite.*.js"]

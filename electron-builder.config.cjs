@@ -7,7 +7,7 @@ const extraResources = [
 module.exports = {
   appId: 'org.orbeyond.modpackexporter',
   productName: 'ORB Modpack Exporter',
-  artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+  artifactName: 'ORB-Modpack-Exporter-${version}-${os}-${arch}.${ext}',
   copyright: 'Copyright © ${author}',
   asar: true,
   directories: {
@@ -22,8 +22,8 @@ module.exports = {
   publish: [
     {
       provider: 'github',
-      owner: 'OR-Beyond',
-      repo: 'modpack-exporter',
+      owner: process.env.GH_OWNER || 'OR-Beyond',
+      repo: process.env.GH_REPO || 'modpack-exporter',
       releaseType: 'release',
     },
   ],
@@ -33,7 +33,7 @@ module.exports = {
     icon: 'build/icons/icon.ico',
     target: [
       { target: 'nsis', arch: ['x64', 'arm64'] },
-      { target: 'msi', arch: ['x64', 'arm64'] },
+      { target: 'portable', arch: ['x64', 'arm64'] },
     ],
     executableName: 'orb-modpack-exporter',
     requestedExecutionLevel: 'asInvoker',
@@ -47,13 +47,10 @@ module.exports = {
     shortcutName: 'ORB Modpack Exporter',
     uninstallDisplayName: 'ORB Modpack Exporter',
     deleteAppDataOnUninstall: false,
+    artifactName: 'ORB-Modpack-Exporter-${version}-setup-${arch}.${ext}',
   },
-  msi: {
-    oneClick: false,
-    perMachine: false,
-    createDesktopShortcut: true,
-    createStartMenuShortcut: true,
-    shortcutName: 'ORB Modpack Exporter',
+  portable: {
+    artifactName: 'ORB-Modpack-Exporter-${version}-portable-${arch}.${ext}',
   },
 
   // ── macOS ──────────────────────────────────────────────────────────────────
@@ -62,6 +59,7 @@ module.exports = {
     category: 'public.app-category.developer-tools',
     target: [
       { target: 'dmg', arch: ['x64', 'arm64'] },
+      { target: 'zip', arch: ['x64', 'arm64'] },
     ],
     hardenedRuntime: true,
     gatekeeperAssess: false,
@@ -85,6 +83,8 @@ module.exports = {
     description: 'A desktop collaboration tool that lets Minecraft modpack developers sync mods, export releases, and manage team contributions.',
     target: [
       { target: 'AppImage', arch: ['x64', 'arm64'] },
+      { target: 'deb', arch: ['x64', 'arm64'] },
+      { target: 'rpm', arch: ['x64', 'arm64'] },
     ],
   },
   appImage: {

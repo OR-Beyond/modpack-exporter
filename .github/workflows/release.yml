@@ -12,26 +12,48 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  verify-version:
+    name: Verify tag matches package.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json: $PKG_VERSION"
+          echo "tag:          $TAG"
+          if [ "$PKG_VERSION" != "$TAG" ]; then
+            echo "Version mismatch: package.json ($PKG_VERSION) != tag ($TAG)" >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.name }}
+    needs: verify-version
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Windows
             os: windows-latest
-            builder_args: --win nsis msi portable
+            builder_args: --win nsis portable
           - name: Linux
             os: ubuntu-latest
             builder_args: --linux AppImage deb rpm
           - name: macOS
             os: macos-latest
-            builder_args: --mac dmg zip pkg
+            builder_args: --mac dmg zip
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,8 +82,20 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Build installers
+      - name: Build installers (no publish)
         run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
+
+      - name: Sign Windows artifacts (SignPath, optional)
+        if: runner.os == 'Windows' && secrets.SIGNPATH_API_TOKEN != ''
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          echo "Sign both *-setup-*.exe and *-portable-*.exe via SignPath here."
+          echo "IMPORTANT: signing must complete BEFORE latest.yml hashes are finalized."
+          echo "If SignPath rewrites the exe bytes, regenerate latest.yml (SHA512) afterwards."
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -73,22 +107,19 @@ jobs:
             dist/*.rpm
             dist/*.dmg
             dist/*.zip
-            dist/*.pkg
             dist/*.exe
-            dist/*.msi
             dist/*.yml
             dist/*.yaml
             dist/*.blockmap
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  release:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -96,6 +127,14 @@ jobs:
           path: release-artifacts
           pattern: release-*
           merge-multiple: true
+
+      - name: Validate artifact set
+        run: |
+          set -e
+          ls -la release-artifacts
+          test -n "$(ls release-artifacts/*-setup-*.exe 2>/dev/null)" || { echo "missing setup exe"; exit 1; }
+          test -n "$(ls release-artifacts/*-portable-*.exe 2>/dev/null)" || { echo "missing portable exe"; exit 1; }
+          test -f release-artifacts/latest.yml || { echo "missing latest.yml"; exit 1; }
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -106,3 +145,17 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-artifacts/*
+
+  build-only:
+    name: Build-only (PR)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx tsc --noEmit
