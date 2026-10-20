@@ -86,13 +86,15 @@ jobs:
         run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
 
       - name: Sign Windows artifacts (SignPath, optional)
-        if: runner.os == 'Windows' && secrets.SIGNPATH_API_TOKEN != ''
+        if: runner.os == 'Windows'
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
           SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
           SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+        shell: bash
         run: |
+          if [ -z "$SIGNPATH_API_TOKEN" ]; then echo 'SignPath token not set; skipping signing.'; exit 0; fi
           echo "Sign both *-setup-*.exe and *-portable-*.exe via SignPath here."
           echo "IMPORTANT: signing must complete BEFORE latest.yml hashes are finalized."
           echo "If SignPath rewrites the exe bytes, regenerate latest.yml (SHA512) afterwards."
