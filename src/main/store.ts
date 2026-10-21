@@ -1,4 +1,6 @@
 import Store from 'electron-store';
+import path from 'path';
+import os from 'os';
 
 export interface StoreSchema {
   githubToken: string;
@@ -10,25 +12,21 @@ export interface StoreSchema {
   discordWebhook: string;
   modrinthProjectId: string;
   modrinthToken: string;
-  /** Set to 'true' once the versions repo has been cloned AND the first full pull
-   *  has completed. Gates the first-run initialization flow so it retries on the
-   *  next launch if the user quits mid-setup. */
   initialSetupComplete: string;
-  /** Optional custom Modrinth App data folder (parent of profiles/), for portable
-   *  or non-default installs the fixed %APPDATA%/ModrinthApp scan won't find. */
   modrinthPath: string;
-  /** When true, push and pull operations are blocked to prevent accidental profile changes. */
   readOnlyMode: boolean;
-  /** When true, a pull runs automatically after login on every launch. Defaults to false
-   *  (opt-in) since auto-sync can silently overwrite local changes the user hasn't pushed yet. */
   autoSyncOnLaunch: boolean;
-  /** Minecraft version written to modrinth.index.json's "dependencies" field. */
   minecraftVersion: string;
-  /** Fabric Loader version written to modrinth.index.json's "dependencies" field. */
   fabricLoaderVersion: string;
 }
 
+const isSandbox = typeof __SANDBOX__ !== 'undefined' && __SANDBOX__;
+
+export const SANDBOX_ROOT = __SANDBOX__ ? path.join(os.tmpdir(), 'orb-exporter-sandbox') : '';
+
 export const store = new Store<StoreSchema>({
+  name: isSandbox ? 'config-sandbox' : 'config',
+  cwd: isSandbox ? SANDBOX_ROOT : undefined,
   defaults: {
     githubToken: '',
     modpackRoot: '',

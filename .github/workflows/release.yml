@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild (leave empty for the pushed tag)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -22,107 +27,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
+          bun-version: 1.4.2
       - name: Check version
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          TAG="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${TAG#v}"
           echo "package.json: $PKG_VERSION"
           echo "tag:          $TAG"
           if [ "$PKG_VERSION" != "$TAG" ]; then
-            echo "Version mismatch: package.json ($PKG_VERSION) != tag ($TAG)" >&2
+            echo "Version mismatch" >&2
             exit 1
           fi
 
-  build:
-    name: Build ${{ matrix.name }}
+  build-windows:
+    name: Build Windows
     needs: verify-version
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            os: windows-latest
-            builder_args: --win nsis portable
-          - name: Linux
-            os: ubuntu-latest
-            builder_args: --linux AppImage deb rpm
-          - name: macOS
-            os: macos-latest
-            builder_args: --mac dmg zip
+    uses: ./.github/workflows/build.yml
+    with:
+      os: windows-latest
+      builder_args: --win nsis portable
 
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-linux:
+    name: Build Linux
+    needs: verify-version
+    uses: ./.github/workflows/build.yml
+    with:
+      os: ubuntu-latest
+      builder_args: --linux AppImage deb rpm
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install Linux packaging tools
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm
-
-      - name: Build application
-        run: bun run build
-
-      - name: Build installers (no publish)
-        run: bunx electron-builder --config electron-builder.config.cjs ${{ matrix.builder_args }} --publish never
-
-      - name: Sign Windows artifacts (SignPath, optional)
-        if: runner.os == 'Windows'
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-          SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
-        shell: bash
-        run: |
-          if [ -z "$SIGNPATH_API_TOKEN" ]; then echo 'SignPath token not set; skipping signing.'; exit 0; fi
-          echo "Sign both *-setup-*.exe and *-portable-*.exe via SignPath here."
-          echo "IMPORTANT: signing must complete BEFORE latest.yml hashes are finalized."
-          echo "If SignPath rewrites the exe bytes, regenerate latest.yml (SHA512) afterwards."
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ runner.os }}
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
-            dist/*.dmg
-            dist/*.zip
-            dist/*.exe
-            dist/*.yml
-            dist/*.yaml
-            dist/*.blockmap
-          if-no-files-found: error
-          retention-days: 7
+  build-macos:
+    name: Build macOS
+    needs: verify-version
+    uses: ./.github/workflows/build.yml
+    with:
+      os: macos-latest
+      builder_args: --mac dmg zip
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -133,7 +80,6 @@ jobs:
           path: release-artifacts
           pattern: release-*
           merge-multiple: true
-
       - name: Validate artifact set
         run: |
           set -e
@@ -141,29 +87,11 @@ jobs:
           test -n "$(ls release-artifacts/*-setup-*.exe 2>/dev/null)" || { echo "missing setup exe"; exit 1; }
           test -n "$(ls release-artifacts/*-portable-*.exe 2>/dev/null)" || { echo "missing portable exe"; exit 1; }
           test -f release-artifacts/latest.yml || { echo "missing latest.yml"; exit 1; }
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
           fail_on_unmatched_files: true
-          files: |
-            release-artifacts/*
-
-  build-only:
-    name: Build-only (PR)
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: bunx tsc --noEmit
+          files: release-artifacts/*

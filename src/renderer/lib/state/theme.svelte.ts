@@ -16,7 +16,7 @@ const STORAGE_KEY = 'orb.theme';
  * Tokens live in themes.ts (single source of truth); globals.css only provides
  * a minimal fallback for the first paint.
  */
-export function applyTheme(themeId: ThemeId): void {
+function applyTheme(themeId: ThemeId): void {
   const theme = THEMES.find(t => t.id === themeId) ?? DEFAULT_THEME;
   const el = document.documentElement;
   el.dataset.theme = theme.id;

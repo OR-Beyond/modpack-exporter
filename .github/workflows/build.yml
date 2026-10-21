@@ -1,0 +1,61 @@
+name: Build (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      builder_args:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Cache bun
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Build application
+        run: bun run build
+      - name: Typecheck & lint gate
+        run: bun run typecheck && bun run svelte-check && bunx eslint src
+      - name: Build installers (no publish)
+        run: bunx electron-builder --config electron-builder.config.cjs ${{ inputs.builder_args }} --publish never
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.yml
+            dist/*.yaml
+            dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 7

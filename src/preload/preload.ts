@@ -9,6 +9,14 @@ export interface DeviceCodeInfo {
 
 const api = {
   platform: process.platform,
+  isSandbox: __SANDBOX__,
+  sandbox: __SANDBOX__
+    ? {
+        getViolations: () => ipcRenderer.invoke('sandbox:getViolations'),
+        reset: () => ipcRenderer.invoke('sandbox:reset'),
+        root: () => ipcRenderer.invoke('sandbox:root'),
+      }
+    : null,
 
   // ── Auth (device flow) ────────────────────────────────────────────────────
   auth: {

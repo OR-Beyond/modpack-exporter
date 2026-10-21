@@ -1,0 +1,41 @@
+@locale = de
+@nativeName = Deutsch
+@englishName = German
+@direction = ltr
+@translators = machine-drafted, needs native review
+@reviewed = machine-drafted, needs native review
+
+common.cancel = Abbrechen
+common.confirm = Bestätigen
+common.save = Speichern
+common.close = Schließen
+common.loading = Wird geladen…
+common.settings = Einstellungen
+common.home = Startseite
+common.history = Verlauf
+common.issues = Probleme
+common.logs = Protokolle
+common.push = Hochladen
+common.pull = Herunterladen
+common.export = Exportieren
+common.undo = Rückgängig
+common.signIn = Mit GitHub anmelden
+common.signOut = Abmelden
+common.welcome = Willkommen beim ORB Modpack Exporter
+
+home.title = Startseite
+home.syncing = Synchronisiere…
+home.pullLatest = Neueste holen
+home.pushChanges = Änderungen hochladen
+home.exportModpack = Modpack exportieren
+home.noRoot = Legen Sie den Modpack-Stamm in den Einstellungen fest, um Git + Export zu aktivieren
+
+settings.title = Einstellungen
+settings.language.label = Sprache
+settings.language.description = Wählen Sie die Anzeigesprache der Benutzeroberfläche.
+settings.modpackRoot = Modpack-Stamm
+settings.readOnly = Nur-Lesen-Modus
+settings.autoSync = Automatische Synchronisation beim Start
+
+errors.generic = Etwas ist schiefgelaufen.
+errors.sync.identityMismatch = Profil-Identitätskonflikt — Synchronisation wird abgebrochen, um eine Profil-Verunreinigung zu verhindern.

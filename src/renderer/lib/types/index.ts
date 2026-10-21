@@ -320,6 +320,12 @@ declare global {
   interface Window {
     electron: {
       platform: string;
+      isSandbox: boolean;
+      sandbox: null | {
+        getViolations: () => Promise<{ kind: string; detail: string; at: string }[]>;
+        reset: () => Promise<void>;
+        root: () => Promise<string>;
+      };
       auth: {
         start: () => Promise<AuthStartResult>;
         logout: () => Promise<{ success: boolean; error?: string }>;

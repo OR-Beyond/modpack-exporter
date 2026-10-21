@@ -41,6 +41,6 @@ export async function setCachedSetting(key: string, value: string): Promise<void
   await window.electron.settings.set(key, value);
 }
 
-export function isSettingsCacheReady(): boolean {
+function isSettingsCacheReady(): boolean {
   return ready;
 }

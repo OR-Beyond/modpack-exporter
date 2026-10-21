@@ -81,7 +81,7 @@ export function initLogger(): void {
 }
 
 /** Restore original console functions (useful for cleanup). */
-export function destroyLogger(): void {
+function destroyLogger(): void {
   if (!installed) return;
   installed = false;
   window.electron.logs.offEntry();

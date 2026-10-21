@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "types": [],
+    "paths": { "@/*": ["./src/renderer/*"] }
+  },
+  "include": ["src/renderer/**/*", "vite.renderer.config.mts"]
+}

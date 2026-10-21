@@ -30,3 +30,5 @@ declare module '*.icns' {
   const src: string;
   export default src;
 }
+
+declare const __SANDBOX__: boolean;

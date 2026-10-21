@@ -7,7 +7,7 @@
  * `Toaster.svelte`; this module owns the state and the public API.
  */
 
-export type ToastType = 'blank' | 'success' | 'error' | 'loading';
+type ToastType = 'blank' | 'success' | 'error' | 'loading';
 
 export interface ToastRecord {
   id: string;

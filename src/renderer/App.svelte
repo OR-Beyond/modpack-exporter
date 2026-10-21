@@ -649,6 +649,9 @@
   const initActive = $derived(initState === 'cloning' || initState === 'pulling' || initState === 'error');
 </script>
 
+{#if __SANDBOX__}
+  <div class="fixed top-0 inset-x-0 z-[9999] bg-danger text-on-accent text-center text-xs font-bold py-1">SANDBOX — nothing here is real</div>
+{/if}
 {#if authState === 'loading'}
   <!-- ── Render: loading splash ── -->
   <div class="flex items-center justify-center h-screen bg-background drag-region">
@@ -813,6 +816,12 @@
         <span class="w-1.5 h-1.5 rounded-full animate-pulse bg-link"></span>
         Syncing\u2026
       </div>
+    {/if}
+
+    {#if __SANDBOX__}
+      {#await import('./lib/components/SandboxPanel/index.svelte') then { default: SandboxPanel }}
+        <SandboxPanel />
+      {/await}
     {/if}
 
     {#if !modpackRootSet && !showSettings && !initActive && page === 'home'}

@@ -24,6 +24,7 @@
 
   let failed = $state(false);
   const letter = $derived((name || '?')[0].toUpperCase());
+  const px = $derived(size === 'sm' ? 24 : size === 'lg' ? 40 : 28);
   const showPlaceholder = $derived(!iconUrl || failed);
 </script>
 
@@ -39,7 +40,10 @@
 {:else}
   <img
     src={iconUrl}
+    width={px}
+    height={px}
     loading="lazy"
+    decoding="async"
     alt={name}
     onerror={() => (failed = true)}
     class="flex-shrink-0 object-cover {SIZE_CLASSES[size]} {dimmed ? 'opacity-60' : ''} {className}"

@@ -1,0 +1,7 @@
+[install]
+# electron-builder traverses node_modules to collect production deps; bun's
+# default isolated layout breaks that. Hoisted layout matches npm/pnpm classic.
+linker = "hoisted"
+
+# Only these packages are allowed to run install scripts (security allowlist).
+trustedDependencies = ["electron"]

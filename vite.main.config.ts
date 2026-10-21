@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite';
 import { builtinModules } from 'module';
 
+const isSandbox = process.env.ORB_SANDBOX === '1';
 export default defineConfig({
+  define: { __SANDBOX__: JSON.stringify(isSandbox) },
   resolve: { conditions: ['node'] },
   build: {
     outDir: '.vite/build',
@@ -9,7 +11,7 @@ export default defineConfig({
     lib: {
       entry: 'src/main/index.ts',
       formats: ['cjs'],
-      fileName: () => 'index.js',
+      fileName: () => 'index.cjs',
     },
     rollupOptions: {
       external: [

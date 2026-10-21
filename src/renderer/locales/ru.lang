@@ -1,0 +1,41 @@
+@locale = ru
+@nativeName = Русский
+@englishName = Russian
+@direction = ltr
+@translators = machine-drafted, needs native review
+@reviewed = machine-drafted, needs native review
+
+common.cancel = Отмена
+common.confirm = Подтвердить
+common.save = Сохранить
+common.close = Закрыть
+common.loading = Загрузка…
+common.settings = Настройки
+common.home = Главная
+common.history = История
+common.issues = Проблемы
+common.logs = Журнал
+common.push = Отправить
+common.pull = Получить
+common.export = Экспорт
+common.undo = Отменить
+common.signIn = Войти через GitHub
+common.signOut = Выйти
+common.welcome = Добро пожаловать в ORB Modpack Exporter
+
+home.title = Главная
+home.syncing = Синхронизация…
+home.pullLatest = Получить последнюю версию
+home.pushChanges = Отправить изменения
+home.exportModpack = Экспортировать модпак
+home.noRoot = Укажите корень модпака в настройках, чтобы включить git и экспорт
+
+settings.title = Настройки
+settings.language.label = Язык
+settings.language.description = Выберите язык интерфейса.
+settings.modpackRoot = Корень модпака
+settings.readOnly = Режим только для чтения
+settings.autoSync = Автосинхронизация при запуске
+
+errors.generic = Что-то пошло не так.
+errors.sync.identityMismatch = Несовпадение профиля — синхронизация прервана для предотвращения смешивания профилей.

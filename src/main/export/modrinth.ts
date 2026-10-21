@@ -209,7 +209,7 @@ export async function getLatestModrinthVersion(projectId: string): Promise<strin
       { headers: UA_HEADERS, signal: AbortSignal.timeout(5000) },
     );
     if (res.ok) {
-      const versions: any[] = await res.json();
+      const versions: any[] = (await res.json()) as any[];
       if (versions.length > 0) {
         return versions[0].version_number ?? null;
       }
@@ -244,7 +244,7 @@ export async function publishVersion(
       { headers: UA_HEADERS, signal: AbortSignal.timeout(8000) },
     );
     if (existingRes.ok) {
-      const versions: any[] = await existingRes.json();
+      const versions: any[] = (await existingRes.json()) as any[];
       const existing = versions.find(v => v.version_number === opts.versionNumber);
       if (existing) {
         return {
@@ -309,7 +309,7 @@ async function resolveLoaderVersion(root: string, configLoaderVersion?: string):
                 signal: AbortSignal.timeout(5000),
               });
               if (res.ok) {
-                const loaders: any[] = await res.json();
+                const loaders: any[] = (await res.json()) as any[];
                 const stable = loaders.find(l => l.stable);
                 if (stable) return stable.version;
               }

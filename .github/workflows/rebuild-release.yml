@@ -1,0 +1,108 @@
+name: Rebuild Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag (v*)"
+        required: true
+        type: string
+      platforms:
+        description: "Platforms to rebuild"
+        required: true
+        type: choice
+        options: [windows, linux, macos, all]
+      mode:
+        description: "build-only or republish"
+        required: true
+        type: choice
+        options: [build-only, republish]
+      clobber:
+        description: "Replace existing assets of the same name"
+        required: false
+        type: boolean
+        default: false
+      signing:
+        description: "Enable signing (only effective when secrets exist)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.tag }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - id: t
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          TAG="${{ inputs.tag }}"
+          TAGN="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if [ "$PKG_VERSION" != "$TAGN" ]; then echo "version mismatch" >&2; exit 1; fi
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then echo "tag not found" >&2; exit 1; fi
+
+  build-windows:
+    name: Build Windows
+    needs: verify
+    if: ${{ inputs.platforms == 'windows' || inputs.platforms == 'all' }}
+    uses: ./.github/workflows/build.yml
+    with:
+      os: windows-latest
+      builder_args: --win nsis portable
+
+  build-linux:
+    name: Build Linux
+    needs: verify
+    if: ${{ inputs.platforms == 'linux' || inputs.platforms == 'all' }}
+    uses: ./.github/workflows/build.yml
+    with:
+      os: ubuntu-latest
+      builder_args: --linux AppImage deb rpm
+
+  build-macos:
+    name: Build macOS
+    needs: verify
+    if: ${{ inputs.platforms == 'macos' || inputs.platforms == 'all' }}
+    uses: ./.github/workflows/build.yml
+    with:
+      os: macos-latest
+      builder_args: --mac dmg zip
+
+  republish:
+    name: Republish assets
+    if: ${{ inputs.mode == 'republish' }}
+    needs: [verify, build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+      - name: Upload to existing release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          draft: false
+          files: release-artifacts/*

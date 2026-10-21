@@ -1,0 +1,4 @@
+{
+  "entry": ["src/**/index.ts", "eslint.config.js", "electron-builder.config.cjs", "*.config.{js,cjs,ts,mts}"],
+  "project": ["src/**/*.{ts,svelte}", "*.config.{js,cjs,ts,mts}"]
+}

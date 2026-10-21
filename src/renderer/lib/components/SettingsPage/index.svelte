@@ -10,6 +10,7 @@
   import Package from '@lucide/svelte/icons/package';
   import type { Component } from 'svelte';
   import ProfileSelector from '../SettingsModal/ProfileSelector.svelte';
+  import LanguageSelector from '../common/LanguageSelector.svelte';
   import { getCachedSetting, setCachedSetting } from '../../utils/settingsCache';
   import { themeState } from '../../state/theme.svelte';
   import { THEMES } from '../../theme/themes';
@@ -24,6 +25,7 @@
   import Toggle from '../base/Toggle.svelte';
   import ConfirmDialog from '../ConfirmDialog.svelte';
   import { toast } from '../../state/toast.svelte';
+  import { i18n, locales } from '../../i18n/index.svelte';
   import { ipc } from '../../ipc';
 
   interface Props {
@@ -366,6 +368,11 @@
                 </button>
               {/each}
             </div>
+          </Card>
+
+          <Card class="p-4 md:col-span-2">
+            {@render sectionTitle('Language', 'Display language for the whole interface. Applied instantly and remembered across launches.')}
+            <LanguageSelector description="Choose your preferred language." />
           </Card>
         </div>
       </div>

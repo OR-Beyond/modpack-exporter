@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": ["node"],
+    "paths": {}
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "vite.main.config.ts", "vite.preload.config.ts", "electron-builder.config.cjs"]
+}

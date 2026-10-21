@@ -1,0 +1,15 @@
+@locale = en-XA
+@nativeName = Pseudo (test)
+@englishName = Pseudo-locale
+@direction = ltr
+@translators = dev-only
+@reviewed = dev-only
+
+common.cancel = [Çåñçéļ one two three]
+common.confirm = [Çöñƒîŕm]
+common.save = [Šåvé]
+common.close = [Çļöšé]
+common.loading = [Ļöåðîñĝ…]
+common.settings = [Šéţţîñĝš]
+common.home = [Hömé]
+common.welcome = [Ŵéļçömé ţö ÖŘβ Möðþåçĸ Éẋþöŕţéŕ]

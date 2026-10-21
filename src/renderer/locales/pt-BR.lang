@@ -1,0 +1,41 @@
+@locale = pt-BR
+@nativeName = Português (Brasil)
+@englishName = Portuguese (Brazil)
+@direction = ltr
+@translators = machine-drafted, needs native review
+@reviewed = machine-drafted, needs native review
+
+common.cancel = Cancelar
+common.confirm = Confirmar
+common.save = Salvar
+common.close = Fechar
+common.loading = Carregando…
+common.settings = Configurações
+common.home = Início
+common.history = Histórico
+common.issues = Problemas
+common.logs = Logs
+common.push = Enviar
+common.pull = Baixar
+common.export = Exportar
+common.undo = Desfazer
+common.signIn = Entrar com GitHub
+common.signOut = Sair
+common.welcome = Bem-vindo ao ORB Modpack Exporter
+
+home.title = Início
+home.syncing = Sincronizando…
+home.pullLatest = Baixar mais recente
+home.pushChanges = Enviar alterações
+home.exportModpack = Exportar modpack
+home.noRoot = Defina a raiz do modpack em Configurações para ativar git + exportação
+
+settings.title = Configurações
+settings.language.label = Idioma
+settings.language.description = Escolha o idioma de exibição da interface.
+settings.modpackRoot = Raiz do modpack
+settings.readOnly = Modo somente leitura
+settings.autoSync = Sincronização automática ao iniciar
+
+errors.generic = Algo deu errado.
+errors.sync.identityMismatch = Incompatibilidade de perfil — abortando a sincronização para evitar contaminação entre perfis.

@@ -9,9 +9,9 @@
  */
 import { BrowserWindow, ipcMain } from 'electron';
 
-export type MainLogLevel = 'log' | 'info' | 'warn' | 'error';
+type MainLogLevel = 'log' | 'info' | 'warn' | 'error';
 
-export interface MainLogEntry {
+interface MainLogEntry {
   id: number;
   timestamp: string;
   level: MainLogLevel;
@@ -80,12 +80,12 @@ export function initMainLogger(): void {
 }
 
 /** Snapshot of the main-process log buffer. */
-export function getMainLogs(): MainLogEntry[] {
+function getMainLogs(): MainLogEntry[] {
   return [...entries];
 }
 
 /** Clear the main-process log buffer (renderer mirrors this via logs:clear). */
-export function clearMainLogs(): void {
+function clearMainLogs(): void {
   entries.length = 0;
   nextId = 0;
 }
