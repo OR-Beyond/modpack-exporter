@@ -8,7 +8,7 @@ import './lib/styles/globals.css';
 
 // Apply the persisted theme before the first paint so the UI never flashes.
 initTheme();
-initI18n(navigator.language);
+initI18n();
 initLogger();
 
 mount(App, { target: document.getElementById('root')! });

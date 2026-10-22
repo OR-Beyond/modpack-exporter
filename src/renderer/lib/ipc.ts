@@ -164,10 +164,10 @@ export const ipc = {
   },
 
   logs: {
-    get: (): Promise<{ success: boolean; data?: LogEntry[]; error?: string }> => window.electron.logs.get(),
-    clear: (): Promise<{ success: boolean; error?: string }> => window.electron.logs.clear(),
+    get: (): Promise<{ success: boolean; data?: LogEntry[]; error?: string }> => window.electron.logs!.get(),
+    clear: (): Promise<{ success: boolean; error?: string }> => window.electron.logs!.clear(),
     onEntry: (handler: (entry: LogEntry) => void): (() => void) =>
-      subscribe(window.electron.logs.onEntry, window.electron.logs.offEntry, handler),
+      subscribe(window.electron.logs!.onEntry, window.electron.logs!.offEntry, handler),
   },
 
   profile: {

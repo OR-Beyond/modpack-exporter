@@ -105,3 +105,16 @@ Desktop tool for Minecraft modpack developers (Origin Realms Beyond) to sync mod
 - Atomic export: write to a temp file, validate, then rename. Never leave a partial `.mrpack`.
 - Trusted download hosts: `cdn.modrinth.com`, `github.com`, `raw.githubusercontent.com`, `gitlab.com`.
 - Run `bun run verify:mrpack <file>` to validate an exported pack offline.
+
+## Structure (Pass 4)
+- `src/shared/` — shared types (`src/shared/types/<system>/`), constants, errors, ipc-contract.
+- Path aliases: `@main/*`, `@renderer/*`, `@shared/*` (mirrored in Vite/tsconfig).
+- Dev-only code is gated by `__DEV__` (build-time, `ORB_DEV=1`) and lives under dev-only paths; production bundles exclude it.
+- Discord notifications use Components V2 (see docs/discord-notifications.md); every payload must pass `validateWebhookV2Payload`.
+- Mod icons resolve through the shared icon pipeline (main: `resolveModIcon`/`lookupModrinthHash`; renderer: `ModIcon`/`ModIconLazy`).
+
+## Secret policy
+- Never commit webhook URLs, tokens, OAuth credentials or CI secrets.
+- Secrets supplied via safeStorage (app) or env vars (scripts).
+- `bun run secret-scan` must be green; it runs in the gate.
+- The legacy hardcoded Discord webhook is considered compromised; owner must rotate it.

@@ -1,0 +1,29 @@
+:root {
+  color-scheme: dark;
+  --color-background: 30 30 30;
+  --color-foreground: 255 255 255;
+  --color-card: 38 38 42;
+  --color-card-foreground: 255 255 255;
+  --color-muted: 169 169 171;
+  --color-muted-foreground: 139 148 158;
+  --color-subtle: 24 24 26;
+  --color-line: 255 255 255;
+  --color-line-strong: 48 54 61;
+  --color-ring: 8 144 254;
+  --color-primary: 8 144 254;
+  --color-primary-hover: 26 157 255;
+  --color-link: 88 166 255;
+  --color-success: 32 172 100;
+  --color-success-strong: 35 134 54;
+  --color-warning: 255 168 9;
+  --color-warning-soft: 210 153 29;
+  --color-danger: 248 81 73;
+  --color-danger-strong: 218 54 51;
+  --color-brand: 226 71 41;
+  --color-brand-end: 255 63 110;
+  --color-overlay: 0 0 0;
+  --color-on-accent: 255 255 255;
+  --color-on-warning: 30 30 30;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+}

@@ -14,7 +14,6 @@ common.settings = Настройки
 common.home = Главная
 common.history = История
 common.issues = Проблемы
-common.logs = Журнал
 common.push = Отправить
 common.pull = Получить
 common.export = Экспорт

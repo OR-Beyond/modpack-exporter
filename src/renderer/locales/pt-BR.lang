@@ -14,7 +14,6 @@ common.settings = Configurações
 common.home = Início
 common.history = Histórico
 common.issues = Problemas
-common.logs = Logs
 common.push = Enviar
 common.pull = Baixar
 common.export = Exportar

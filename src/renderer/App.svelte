@@ -10,7 +10,6 @@
   import HistoryPage from './lib/components/HistoryPage/index.svelte';
   import Sidebar from './lib/components/Sidebar/index.svelte';
   import SettingsPage from './lib/components/SettingsPage/index.svelte';
-  import LogsPage from './lib/components/LogsPage/index.svelte';
   import IssuesPage from './lib/components/IssuesPage/index.svelte';
   import PushModal from './lib/components/PushModal/index.svelte';
   import ExportModal from './lib/components/ExportModal/index.svelte';
@@ -53,6 +52,11 @@
 
   // ── Page routing ───────────────────────────────────────────────────────────
   let page = $state<Page>('home');
+  $effect(() => {
+    if (page === 'logs' && !(import.meta.env.DEV || (typeof __DEV__ !== 'undefined' && __DEV__))) {
+      page = 'home';
+    }
+  });
 
   // ── Core state ─────────────────────────────────────────────────────────────
   let authState = $state<AuthState>('loading');
@@ -746,8 +750,10 @@
       />
     {:else if page === 'issues'}
       <IssuesPage />
-    {:else if page === 'logs'}
-      <LogsPage />
+    {:else if page === 'logs' && (import.meta.env.DEV || (typeof __DEV__ !== 'undefined' && __DEV__))}
+      {#await import('./lib/components/LogsPage/index.svelte') then mod}
+        <mod.default />
+      {/await}
     {/if}
 
     {#if showPush}

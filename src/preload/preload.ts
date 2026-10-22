@@ -125,6 +125,7 @@ const api = {
     getState: () => ipcRenderer.invoke('defaults:get-state'),
     import: (fileType: string) => ipcRenderer.invoke('defaults:import', { fileType }),
   },
+  ...( (__DEV__) ? {
   logs: {
     /** Snapshot of the main-process log buffer (entries emitted so far). */
     get: () => ipcRenderer.invoke('logs:get'),
@@ -138,6 +139,7 @@ const api = {
     /** Remove all log-entry listeners. */
     offEntry: () => ipcRenderer.removeAllListeners('logs:entry'),
   },
+  } : {}),
   app: {
     openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
     showInFolder: (filePath: string) => ipcRenderer.invoke('app:show-in-folder', filePath),

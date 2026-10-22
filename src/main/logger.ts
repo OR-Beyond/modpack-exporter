@@ -20,10 +20,11 @@ interface MainLogEntry {
 }
 
 const MAX_LOGS = 2000;
-const ENTRY_CHANNEL = 'logs:entry';
+const ENTRY_CHANNEL = __DEV__ ? 'logs:entry' : '';
 
 let nextId = 0;
 let installed = false;
+let streamingEnabled = false;
 const entries: MainLogEntry[] = [];
 let originalFns: Record<string, (...args: unknown[]) => void> = {};
 
@@ -37,6 +38,8 @@ function stringify(value: unknown): string {
 }
 
 function broadcast(entry: MainLogEntry): void {
+  if (!__DEV__) return;
+  if (!streamingEnabled) return;
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(ENTRY_CHANNEL, entry);
@@ -92,6 +95,7 @@ function clearMainLogs(): void {
 
 /** Register the logs:* IPC surface. Call once during startup. */
 export function registerLogIpc(): void {
+  streamingEnabled = true;
   ipcMain.handle('logs:get', () => ({ success: true, data: getMainLogs() }));
   ipcMain.handle('logs:clear', () => {
     clearMainLogs();

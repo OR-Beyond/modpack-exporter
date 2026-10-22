@@ -32,11 +32,12 @@
 
   const isMac = ipc.platform === 'darwin';
 
+  const isDevBuild = import.meta.env.DEV || (typeof __DEV__ !== 'undefined' && __DEV__);
   const navItems: { page: Page; label: string; icon: Component<{ size?: number }> }[] = [
     { page: 'home', label: 'Home', icon: LayoutDashboard },
     { page: 'history', label: 'History', icon: History },
     { page: 'issues', label: 'Issues', icon: CircleDot },
-    { page: 'logs', label: 'Logs', icon: ScrollText },
+    ...(isDevBuild ? [{ page: 'logs' as Page, label: 'Logs', icon: ScrollText }] : []),
     { page: 'settings', label: 'Settings', icon: Settings },
   ];
 

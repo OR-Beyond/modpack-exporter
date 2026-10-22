@@ -1344,7 +1344,12 @@ async function ensureGitIdentity(versionsDir: string, githubUser: string): Promi
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 
 function registerIpc() {
-  registerLogIpc();
+  const devMode =
+    (process.env.ORB_DEV !== '0') &&
+    (__DEV__ || process.env.ORB_DEV === '1' || process.env.NODE_ENV === 'development');
+  if (devMode && !app.isPackaged) {
+    registerLogIpc();
+  }
   // App controls
   ipcMain.handle('app:minimize', () => mainWindow?.minimize());
   ipcMain.handle('app:maximize', () => { mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize(); });
@@ -2592,207 +2597,103 @@ function registerIpc() {
         }
       } catch {}
 
-      // Fire-and-forget Discord notification — Modrinth-style mod cards (one embed per mod)
+      // Fire-and-forget Discord notification — Components V2
       void (async () => {
-        const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1514520850542624779/sJUPZiNvGGf6VkPQ7YY5qZCcF5u2pbWXBiz_3VvT_JtwEKiZdUfNrGPGxqAFsvIsc9kq';
-        const DISCORD_ROLE_PING = '<@&1514520168729022474>';
-
-        const webhookUrl = DISCORD_WEBHOOK_URL;
-        if (!webhookUrl) return; // configured webhook missing → skip silently
-
-        const MODRINTH_HEADERS = { 'User-Agent': 'ORB-Modpack-Exporter/1.0' };
-
-        // Section colors
-        const COLOR_HEADER = 5814783;
-        const COLOR_ADDED = 5763719;
-        const COLOR_UPDATED = 16705372;
-        const COLOR_REMOVED = 15548997;
-        const COLOR_FILES = 10197915;
-
-        // Parse a Modrinth CDN download URL:
-        //   https://cdn.modrinth.com/data/{projectId}/versions/{versionId}/{filename}
-        const parseCdn = (url: string): { projectId: string; version: string | null } | null => {
-          try {
-            const parts = url.split('/');
-            if (parts.length < 8 || parts[3] !== 'data' || parts[5] !== 'versions') return null;
-            const filename = parts[7] ?? '';
-            const m = filename.match(/(\d+\.\d+[\d.]*)/);
-            return { projectId: parts[4], version: m ? m[1] : (parts[6] || null) };
-          } catch { return null; }
-        };
-
-        // Resolve display info for a manifest entry via the Modrinth cache + CDN URL.
-        interface ModInfo {
-          slug: string;
-          name: string;
-          iconUrl: string | null;
-          projectId: string | null;
-          version: string | null;
-          isLocal: boolean;
-        }
-        const entryInfo = (entry: any): ModInfo => {
-          const slug = path.basename(entry.path as string, '.jar');
-          const sha: string = entry.hashes?.sha512 ?? '';
-          const cached = sha && cache[sha] ? cache[sha] : null;
-          const url: string = Array.isArray(entry.downloads) ? (entry.downloads[0] ?? '') : '';
-          const cdn = url ? parseCdn(url) : null;
-          const isLocal = entry.source === 'local' || !url;
-          return {
-            slug: cached?.slug || slug,
-            name: cached?.title || slug,
-            iconUrl: cached?.iconUrl || null,
-            projectId: cdn?.projectId ?? null,
-            version: cdn?.version ?? null,
-            isLocal,
-          };
-        };
-
-        // Fetch a mod's description from the Modrinth API (truncated to 350 chars).
-        // Local mods (no projectId) skip the call; failures yield an empty string.
-        const fetchDescription = async (projectId: string | null): Promise<string> => {
-          if (!projectId) return '';
-          try {
-            const res = await fetch(`https://api.modrinth.com/v2/project/${projectId}`, { headers: MODRINTH_HEADERS });
-            if (!res.ok) return '';
-            const proj: any = await res.json();
-            const desc: string = proj.description ?? '';
-            return desc.length > 350 ? desc.slice(0, 350) + '…' : desc;
-          } catch { return ''; }
-        };
-
-        // Combine description + Modrinth link for a card body. Local mods get nothing.
-        const cardBody = (desc: string, m: ModInfo): string => {
-          if (m.isLocal) return '';
-          const modUrl = `https://modrinth.com/mod/${m.slug}`;
-          return desc ? `${desc}\n\n${modUrl}` : modUrl;
-        };
-
-        // Build a single mod card embed for the given kind.
-        const buildModEmbed = async (
-          kind: 'added' | 'updated' | 'removed',
-          m: ModInfo & { oldVersion?: string | null; newVersion?: string | null },
-          color: number,
-        ): Promise<any> => {
-          const desc = await fetchDescription(m.isLocal ? null : m.projectId);
-          let title: string;
-          if (kind === 'added') {
-            title = m.version ? `Added: ${m.name} \`${m.version}\`` : `Added: ${m.name}`;
-          } else if (kind === 'updated') {
-            const verStr =
-              m.oldVersion && m.newVersion ? `${m.oldVersion} → ${m.newVersion}`
-              : m.newVersion ? `→ ${m.newVersion}`
-              : m.oldVersion ? `${m.oldVersion} →`
-              : 'version changed';
-            title = `Updated: ${m.name} \`${verStr}\``;
-          } else {
-            title = m.version ? `Removed: ${m.name} \`${m.version}\`` : `Removed: ${m.name}`;
-          }
-          const embed: any = { title, color };
-          const body = cardBody(desc, m);
-          if (body) embed.description = body;
-          if (m.iconUrl) embed.thumbnail = { url: m.iconUrl };
-          if (!m.isLocal) embed.url = `https://modrinth.com/mod/${m.slug}`;
-          return embed;
-        };
-
-        // ── Compute added / updated / removed by path, detecting version bumps ──
-        const prevByPath = new Map<string, any>(prevFiles.map((f: any) => [f.path, f]));
-        const newByPath = new Map<string, any>(newFiles.map((f: any) => [f.path, f]));
-
-        const added: ModInfo[] = [];
-        const updated: (ModInfo & { oldVersion: string | null; newVersion: string | null })[] = [];
-        const removed: ModInfo[] = [];
-
-        for (const [p, nf] of newByPath) {
-          const pf = prevByPath.get(p);
-          if (!pf) {
-            added.push(entryInfo(nf));
-          } else if ((pf.hashes?.sha512 ?? '') !== (nf.hashes?.sha512 ?? '')) {
-            const oldInfo = entryInfo(pf);
-            const newInfo = entryInfo(nf);
-            updated.push({ ...newInfo, oldVersion: oldInfo.version, newVersion: newInfo.version });
-          }
-        }
-        for (const [p, pf] of prevByPath) {
-          if (!newByPath.has(p)) removed.push(entryInfo(pf));
-        }
-
-        // ── Build ordered "blocks" — each block stays together within a webhook call ──
-        // Block 1: header. Then one block per non-empty section (header + its mod cards).
-        // Finally a changed-files block if any. A block larger than 10 embeds (a section
-        // with many mods) is the only thing allowed to split across calls.
-        const blocks: any[][] = [];
-
-        // 1. Header embed
-        blocks.push([{
-          title: `Modpack Updated — v${newVersion}`,
-          description: message || `Modpack push v${newVersion}`,
-          color: COLOR_HEADER,
-          author: { name: githubUser, icon_url: `https://github.com/${githubUser}.png` },
-          timestamp: new Date().toISOString(),
-        }]);
-
-        // 2 + 3. Added Mods
-        if (added.length > 0) {
-          const cards = await Promise.all(added.map(m => buildModEmbed('added', m, COLOR_ADDED)));
-          blocks.push([{ title: '✅ Added Mods', color: COLOR_ADDED }, ...cards]);
-        }
-
-        // 4 + 5. Updated Mods
-        if (updated.length > 0) {
-          const cards = await Promise.all(updated.map(m => buildModEmbed('updated', m, COLOR_UPDATED)));
-          blocks.push([{ title: '🔄 Updated Mods', color: COLOR_UPDATED }, ...cards]);
-        }
-
-        // 6 + 7. Removed Mods
-        if (removed.length > 0) {
-          const cards = await Promise.all(removed.map(m => buildModEmbed('removed', m, COLOR_REMOVED)));
-          blocks.push([{ title: '❌ Removed Mods', color: COLOR_REMOVED }, ...cards]);
-        }
-
-        // 8. Changed Files (non-mod override files touched in this commit)
         try {
-          const diff = await gitProvider.diffLastCommit(versionsDir, 'overrides/');
-          const stdout = diff.join('\n');
-          const fileList = stdout.trim().split('\n').filter(Boolean).filter(f => !f.startsWith('overrides/mods/'));
-          if (fileList.length > 0) {
-            const lines = fileList.slice(0, 10).map((f: string) => `\`${f}\``);
-            if (fileList.length > 10) lines.push(`+${fileList.length - 10} more`);
-            blocks.push([{ title: '📁 Changed Files', description: lines.join('\n'), color: COLOR_FILES }]);
-          }
-        } catch {}
+          const webhookUrl = (store.get('discordWebhook') as string) || '';
+          if (!webhookUrl) return;
 
-        // ── Pack blocks into webhook calls of ≤10 embeds, never splitting a header
-        //    from its cards (only an oversized section may span calls, header first) ──
-        const batches: any[][] = [];
-        let current: any[] = [];
-        for (const block of blocks) {
-          if (block.length > 10) {
-            if (current.length) { batches.push(current); current = []; }
-            for (let i = 0; i < block.length; i += 10) batches.push(block.slice(i, i + 10));
-            continue;
-          }
-          if (current.length + block.length > 10) {
-            batches.push(current);
-            current = [];
-          }
-          current.push(...block);
-        }
-        if (current.length) batches.push(current);
+          const { buildPushNotification, validateWebhookV2Payload } = await import('./discord');
 
-        // ── Send each batch; role ping only on the first call ──
-        for (let i = 0; i < batches.length; i++) {
-          const payload: any = { embeds: batches[i] };
-          if (i === 0) payload.content = DISCORD_ROLE_PING;
+          const roleIds = ['1514520168729022474'];
+          let changedFileList: string[] = [];
           try {
-            await fetch(webhookUrl, {
+            const diff = await gitProvider.diffLastCommit(versionsDir, 'overrides/');
+            const stdout = diff.join('\n');
+            changedFileList = stdout.trim().split('\n').filter(Boolean).filter((f: string) => !f.startsWith('overrides/mods/'));
+          } catch {}
+
+          const payload = buildPushNotification({
+            modpackName: 'ORB Modpack',
+            version: String(newVersion),
+            commitShort: (pushedCommit?.sha ?? '').slice(0, 7) || undefined,
+            author: githubUser,
+            timestamp: Math.floor(Date.now() / 1000),
+            appVersion: app.getVersion(),
+            added: newModEntries.filter((f: any) => !prevModMap.has(modKey(f))).map((f: any) => {
+              const sha: string = f.hashes?.sha512 ?? '';
+              const cached = sha ? cache[sha] : undefined;
+              const url: string = Array.isArray(f.downloads) ? (f.downloads[0] ?? '') : '';
+              const parsed = url ? parseCdnUrl(url) : null;
+              return { name: cached?.title ?? path.basename(f.path as string, '.jar'), version: parsed?.versionNumber ?? null };
+            }),
+            updated: newModEntries.filter((f: any) => {
+              const k = modKey(f);
+              if (!prevModMap.has(k)) return false;
+              const pf = prevModMap.get(k);
+              return (pf?.hashes?.sha512 ?? '') !== (f.hashes?.sha512 ?? '');
+            }).map((f: any) => {
+              const sha: string = f.hashes?.sha512 ?? '';
+              const cached = sha ? cache[sha] : undefined;
+              const url: string = Array.isArray(f.downloads) ? (f.downloads[0] ?? '') : '';
+              const parsed = url ? parseCdnUrl(url) : null;
+              const pf = prevModMap.get(modKey(f));
+              const oldUrl: string = Array.isArray(pf?.downloads) ? (pf.downloads[0] ?? '') : '';
+              const oldParsed = oldUrl ? parseCdnUrl(oldUrl) : null;
+              return { name: cached?.title ?? path.basename(f.path as string, '.jar'), version: parsed?.versionNumber ?? null, oldVersion: oldParsed?.versionNumber ?? null };
+            }),
+            removed: removedMods.map((m: any) => ({ name: m.name, version: m.versionNumber })),
+            changedFiles: changedFileList,
+            maintainerRoleIds: roleIds,
+            textBudget: 3500,
+          });
+
+          const violations = validateWebhookV2Payload(payload);
+          if (!violations.valid) {
+            console.error('[discord] invalid V2 payload:', violations.join('; '));
+            return;
+          }
+
+          const url = webhookUrl + '?with_components=true&wait=true';
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 15000);
+          let res: Response;
+          try {
+            res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'User-Agent': 'ORB-Modpack-Exporter/1.0' },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
+          if (res.status === 429) {
+            let retryAfter = 1;
+            try { const j: any = await res.json(); retryAfter = (j?.retry_after ?? 1); } catch {}
+            retryAfter = Math.min(Math.max(retryAfter, 0.5), 10);
+            await new Promise(r => setTimeout(r, retryAfter * 1000));
+            await fetch(url, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'User-Agent': 'ORB-Modpack-Exporter/1.0' },
               body: JSON.stringify(payload),
             });
-          } catch (e: any) {
-            console.error('[discord] webhook send failed:', e.message);
+          } else if (!res.ok) {
+            // degraded legacy fallback
+            const fallback = { content: roleIds.map(r => `<@&${r}>`).join(' '), embeds: [{ title: `Modpack Updated — v${newVersion}`, color: 5814783 }] };
+            try {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'User-Agent': 'ORB-Modpack-Exporter/1.0' },
+                body: JSON.stringify(fallback),
+              });
+            } catch {}
+            let errBody = '';
+            try { errBody = await res.text(); } catch {}
+            console.error('[discord] webhook send failed:', res.status, errBody.slice(0, 500));
           }
+        } catch (e: any) {
+          console.error('[discord] notification failed:', e?.message ?? e);
         }
       })();
 
@@ -3092,6 +2993,9 @@ function registerIpc() {
 
         for (const [key, local] of localModMap) {
           const sha512 = local.sha512;
+          if (!cache[sha512]?.iconUrl) {
+            try { await lookupModrinthHash(sha512, local.file, cache); } catch {}
+          }
           const cached = cache[sha512];
           const parsed = local.parsed;
           const slug = cached?.slug ?? path.basename(local.file, '.jar');
@@ -3120,6 +3024,9 @@ function registerIpc() {
         for (const [key, manifestEntry] of manifestModMap) {
           if (!localModMap.has(key)) {
             const sha512: string = manifestEntry.hashes?.sha512 ?? '';
+            if (sha512 && !cache[sha512]?.iconUrl) {
+              try { await lookupModrinthHash(sha512, path.basename(manifestEntry.path as string), cache); } catch {}
+            }
             const cached = cache[sha512];
             const parsed = manifestEntry._parsed;
             const slug = cached?.slug ?? path.basename(manifestEntry.path as string, '.jar');
@@ -3188,6 +3095,7 @@ function registerIpc() {
         }
       }
 
+      try { saveModrinthCache(versionsDir, cache); } catch {}
       return { success: true, addedMods, updatedMods, removedMods, changedFiles, unchangedCount, isFirstPush };
     } catch (e: any) {
       return {

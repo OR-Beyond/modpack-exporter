@@ -14,7 +14,6 @@ common.settings = Settings
 common.home = Home
 common.history = History
 common.issues = Issues
-common.logs = Logs
 common.push = Push
 common.pull = Pull
 common.export = Export

@@ -1,9 +1,19 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext"],
-    "types": ["bun"],
-    "paths": {}
+    "lib": [
+      "ESNext"
+    ],
+    "types": [
+      "bun"
+    ],
+    "paths": {
+      "@shared/*": [
+        "./src/shared/*"
+      ]
+    }
   },
-  "include": ["scripts/**/*"]
+  "include": [
+    "scripts/**/*"
+  ]
 }

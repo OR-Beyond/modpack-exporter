@@ -45,8 +45,22 @@ export const i18n = {
   t(key: string, params?: Record<string, string | number>): string {
     const entry = findLocale(currentCode) ?? locales[0];
     const base = findLocale('en') ?? locales[0];
-    const msg = entry.messages[key] ?? base.messages[key] ?? key;
-    if (!params) return msg;
+    let msg = entry.messages[key];
+    if (msg === undefined) {
+      msg = base.messages[key];
+      if (msg === undefined) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn(`[i18n] missing key: ${key}`);
+        }
+        return key;
+      }
+      if (import.meta.env.DEV && currentCode !== 'en') {
+        // eslint-disable-next-line no-console
+        console.warn(`[i18n] missing key in ${currentCode}: ${key}`);
+      }
+    }
+    if (!params) return msg as string;
     return format(msg, params, currentCode);
   },
 };
@@ -67,9 +81,8 @@ function format(msg: string, params: Record<string, string | number>, locale: st
   return msg;
 }
 
-export function initI18n(defaultLocale?: string): void {
+export function initI18n(_defaultLocale?: string): void {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored && findLocale(stored)) { i18n.setLocale(stored); return; }
-  if (defaultLocale && findLocale(defaultLocale)) { i18n.setLocale(defaultLocale); return; }
   i18n.setLocale('en');
 }

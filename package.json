@@ -26,7 +26,7 @@
     "test:watch": "vitest",
     "package": "bun run build && bunx electron-builder --config electron-builder.config.cjs --dir",
     "dist": "bun run build && bunx electron-builder --config electron-builder.config.cjs",
-    "dev:sandbox": "ORB_SANDBOX=1 bun run build && ORB_SANDBOX=1 bunx electron .",
+    "dev:sandbox": "ORB_DEV=1 ORB_SANDBOX=1 bun run build && ORB_DEV=1 ORB_SANDBOX=1 bunx electron .",
     "test:sandbox": "ORB_SANDBOX=1 bun run test",
     "i18n:check": "bun run scripts/i18n/check.ts",
     "i18n:lint": "bun run scripts/i18n/lint.ts",
@@ -37,7 +37,9 @@
     "release:rebuild": "bun run scripts/release/rebuild.ts",
     "release:retag": "bun run scripts/release/retag.ts",
     "release:status": "bun run scripts/release/status.ts",
-    "verify:mrpack": "bun run scripts/verify-mrpack.ts"
+    "verify:mrpack": "bun run scripts/verify-mrpack.ts",
+    "dev": "ORB_DEV=1 bun run build && ORB_DEV=1 bunx electron .",
+    "secret-scan": "bun run scripts/secret-scan.ts"
   },
   "author": "ORB Team",
   "license": "MIT",

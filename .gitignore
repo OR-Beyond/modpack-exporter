@@ -6,3 +6,5 @@ dist/
 .omo/
 .agent/
 *.tsbuildinfo
+.env.*
+!.env.example

@@ -398,7 +398,7 @@ declare global {
         getState: () => Promise<DefaultOptionsState>;
         import: (fileType: DefaultFileType) => Promise<DefaultImportResult>;
       };
-      logs: {
+      logs?: {
         get: () => Promise<{ success: boolean; data?: LogEntry[]; error?: string }>;
         clear: () => Promise<{ success: boolean; error?: string }>;
         onEntry: (handler: (entry: LogEntry) => void) => void;
