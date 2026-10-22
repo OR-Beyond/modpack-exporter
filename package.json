@@ -1,7 +1,7 @@
 {
   "name": "orb-modpack-exporter",
   "productName": "ORB Modpack Exporter",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "description": "Collaborate via GitHub, export .mrpack files, and track changes",
   "main": ".vite/build/index.cjs",
   "repository": {
@@ -36,7 +36,8 @@
     "release:tag": "bun run scripts/release/tag.ts",
     "release:rebuild": "bun run scripts/release/rebuild.ts",
     "release:retag": "bun run scripts/release/retag.ts",
-    "release:status": "bun run scripts/release/status.ts"
+    "release:status": "bun run scripts/release/status.ts",
+    "verify:mrpack": "bun run scripts/verify-mrpack.ts"
   },
   "author": "ORB Team",
   "license": "MIT",

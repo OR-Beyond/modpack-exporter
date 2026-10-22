@@ -2,6 +2,8 @@ import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
 import type { ModEntry } from './types';
+import { normalizeEntryPath } from './entry';
+import { validateMrpackIndex, hasErrors } from './validator';
 
 function fnmatchToRegex(pattern: string): RegExp {
   let regexStr = '^';
@@ -105,14 +107,23 @@ export function writeIndex(
   mcVer: string,
   loaderVer: string,
 ): void {
+  const normalized = entries
+    .map(e => ({ ...e, path: normalizeEntryPath(e.path) }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
   const index = {
     formatVersion: 1,
     game: 'minecraft',
     name: packName,
     versionId: packVersion,
     dependencies: { minecraft: mcVer, 'fabric-loader': loaderVer },
-    files: entries,
+    files: normalized,
   };
+
+  const violations = validateMrpackIndex(index);
+  if (hasErrors(violations)) {
+    throw new Error(`MRPACK_INVALID_INDEX: ${violations.filter(v=>v.severity==='error').map(v=>v.message).join('; ')}`);
+  }
 
   fs.writeFileSync(
     path.join(stageDir, 'modrinth.index.json'),

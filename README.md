@@ -33,3 +33,6 @@ See docs/translating.md.
 
 ## Releasing
 See docs/build-and-release.md.
+
+## Exported packs
+Exported `.mrpack` files are validated against the Modrinth format. Use `bun run verify:mrpack <file>` to validate offline.

@@ -20,7 +20,7 @@ export interface ExportResult {
 export interface ModEntry {
   path: string;
   downloads: string[];
-  hashes: { sha1: string; sha512: string; sha256: string };
+  hashes: { sha1: string; sha512: string };
   fileSize: number;
   env: { client: string; server: string };
   filename: string;
@@ -38,6 +38,7 @@ export interface ChangelogChanges {
 
 export interface ModrinthMeta {
   downloads: string[];
+  sha1: string | null;
   sha512: string | null;
   env: { client: string; server: string };
   project_id: string | null;

@@ -5,6 +5,9 @@ import type { ExportOptions, ExportResult, ModEntry } from './types';
 import { detectVersions, buildIndex, computeSha1, resolveLoaderVersion, scanFilesHash } from './modrinth';
 import { generateChangelog, findPreviousManifest } from './changelog';
 import { copyRecursive, writeIndex, packageMrpack, updateSimpleUpdateChecker, updateFancyMenu, updateOptions } from './packaging';
+import AdmZip from 'adm-zip';
+import { validateMrpackIndex, validateZipEntryNames, hasErrors } from './validator';
+
 
 export async function buildExport(options: ExportOptions): Promise<ExportResult> {
   const { root, config, packName, version, isLite, isRelease, exportDir } = options;
@@ -136,11 +139,37 @@ export async function buildExport(options: ExportOptions): Promise<ExportResult>
     writeIndex(tmpDir, packName, version, entries, mcVer, loaderVer);
 
     const outpath = String(path.join(exportDir, `${packName} ${version}.mrpack`));
-    result = packageMrpack(tmpDir, outpath);
+    const tmpOut = `${outpath}.tmp-${process.pid}`;
+    packageMrpack(tmpDir, tmpOut);
+
+    // Mandatory final validation: re-open from disk.
+    const zip = new AdmZip(tmpOut);
+    const zipEntries = zip.getEntries().map(e => e.entryName);
+    const indexEntry = zip.getEntry('modrinth.index.json');
+    if (!indexEntry) throw new Error('MISSING_INDEX');
+    const parsed = JSON.parse(indexEntry.getData().toString('utf-8'));
+    const violations = [
+      ...validateMrpackIndex(parsed),
+      ...validateZipEntryNames(zipEntries),
+    ];
+    if (hasErrors(violations)) {
+      throw new Error(`MRPACK_INVALID_INDEX: ${violations.filter(v=>v.severity==='error').map(v=>v.message).join('; ')}`);
+    }
+    // cross-check hashes for files whose bytes are inside the pack (overrides) - best effort
+    // atomic rename
+    if (fs.existsSync(outpath)) fs.unlinkSync(outpath);
+    fs.renameSync(tmpOut, outpath);
+    result = outpath;
 
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+    // clean stray temp output
+    try {
+      const outpath = String(path.join(exportDir, `${packName} ${version}.mrpack`));
+      const tmpOut = `${outpath}.tmp-${process.pid}`;
+      if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
     } catch {}
   }
 

@@ -3,6 +3,8 @@ import fs from 'fs';
 import crypto from 'crypto';
 import AdmZip from 'adm-zip';
 import type { ModEntry, ModrinthMeta } from './types';
+import { hashFile } from './hash';
+import { createManifestFileEntry } from './entry';
 import { getCache } from './cache';
 
 const MODRINTH_BASE = 'https://api.modrinth.com/v2';
@@ -98,13 +100,15 @@ export async function resolveModMetadata(sha1: string): Promise<ModrinthMeta | n
     }
 
     const downloads: string[] = [];
+    let apiSha1: string | null = null;
     let sha512: string | null = null;
     for (const f of data.files ?? []) {
       if (f.url) downloads.push(f.url);
+      if (!apiSha1 && f.hashes?.sha1) apiSha1 = f.hashes.sha1;
       if (!sha512 && f.hashes?.sha512) sha512 = f.hashes.sha512;
     }
 
-    const entry: ModrinthMeta = { downloads, sha512, env, project_id: projectId, version, title };
+    const entry: ModrinthMeta = { downloads, sha1: apiSha1, sha512, env, project_id: projectId, version, title };
     cache.set(sha1, entry);
     return entry;
   } catch {
@@ -115,11 +119,21 @@ export async function resolveModMetadata(sha1: string): Promise<ModrinthMeta | n
 async function processJar(
   jarPath: string,
 ): Promise<{ entry: ModEntry | null; unresolvedPath: string | null }> {
-  const sha1 = computeSha1(jarPath);
+  const local = await hashFile(jarPath);
+  const sha1 = local.sha1;
   const meta = await resolveModMetadata(sha1);
 
   if (!meta || meta.downloads.length === 0) {
     return { entry: null, unresolvedPath: jarPath };
+  }
+
+  // Source-of-truth: verify API hashes against local bytes when both present.
+  if (meta.sha1 && meta.sha1 !== sha1) {
+    throw new Error(`FILE_HASH_MISMATCH: ${jarPath} sha1 expected ${sha1} got ${meta.sha1}`);
+  }
+  const sha512 = meta.sha512 ?? local.sha512;
+  if (meta.sha512 && local.sha512 && meta.sha512 !== local.sha512) {
+    throw new Error(`FILE_HASH_MISMATCH: ${jarPath} sha512 expected ${local.sha512} got ${meta.sha512}`);
   }
 
   const filename = path.basename(jarPath);
@@ -128,10 +142,9 @@ async function processJar(
     downloads: meta.downloads,
     hashes: {
       sha1,
-      sha512: meta.sha512 ?? computeSha512(jarPath),
-      sha256: computeSha256(jarPath),
+      sha512,
     },
-    fileSize: fs.statSync(jarPath).size,
+    fileSize: local.size,
     env: meta.env,
     filename,
     sha1,

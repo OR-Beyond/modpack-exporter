@@ -10,7 +10,7 @@ import { autoUpdater } from 'electron-updater';
 import { store, StoreSchema } from './store';
 const isSandbox = __SANDBOX__;
 import { IsomorphicGitProvider } from './git';
-import { buildExport } from './export';
+import { buildExport, hashFile, migrateManifestEntries, toErrorPayload, validateMrpackIndex, validateZipEntryNames, hasErrors } from './export';
 import { publishVersion } from './export/modrinth';
 import {
   startDeviceAuth,
@@ -1101,6 +1101,8 @@ interface ModrinthLookupResult {
   downloadUrl?: string;
   fileSize?: number;
   filename: string;
+  sha1?: string;
+  sha512?: string;
 }
 
 function loadModrinthCache(versionsDir: string): Record<string, ModrinthLookupResult> {
@@ -1165,6 +1167,8 @@ async function lookupModrinthHash(
       downloadUrl: fileEntry?.url,
       fileSize: fileEntry?.size,
       filename,
+      sha1: fileEntry?.hashes?.sha1,
+      sha512: fileEntry?.hashes?.sha512 ?? sha512,
     };
     return cache[sha512];
   } catch {
@@ -2397,37 +2401,42 @@ function registerIpc() {
         sendProgress('modrinth', `Checking ${jar}…`, percent);
 
         const jarPath = path.join(modsDir, jar);
-        let sha512: string;
+        let localHashes: { sha1: string; sha512: string; size: number };
         try {
-          sha512 = computeSha512(jarPath);
+          localHashes = await hashFile(jarPath);
         } catch (hashErr: any) {
           console.error(`[push] hash failed for ${jar}:`, hashErr.message);
           modsUnresolved.push(jar);
           continue;
         }
 
-        const fileSize = fs.statSync(jarPath).size;
-        const info = await lookupModrinthHash(sha512, jar, cache);
+        const fileSize = localHashes.size;
+        const info = await lookupModrinthHash(localHashes.sha512, jar, cache);
 
         if (info.found && info.downloadUrl) {
+          // Verify API hashes against local bytes when present.
+          if (info.sha512 && info.sha512 !== localHashes.sha512) {
+            console.error(`[push] hash mismatch for ${jar}: local ${localHashes.sha512} vs API ${info.sha512}`);
+            modsUnresolved.push(jar);
+            continue;
+          }
+          if (info.sha1 && !/^[0-9a-f]{40}$/.test(info.sha1)) {
+            // ignore malformed
+          }
+          const sha1 = (info.sha1 && /^[0-9a-f]{40}$/.test(info.sha1)) ? info.sha1 : localHashes.sha1;
           // Modrinth mod — reference by download URL only
           newFiles.push({
-            path: `mods/${info.slug}.jar`,
-            hashes: { sha512 },
+            path: `mods/${info.slug ?? path.basename(jar, '.jar')}.jar`,
+            hashes: { sha1, sha512: localHashes.sha512 },
             downloads: [info.downloadUrl],
             fileSize: info.fileSize ?? fileSize,
+            env: { client: 'required', server: 'optional' },
           });
         } else {
-          // Non-Modrinth — bundle the actual .jar into overrides/mods/
+          // Non-Modrinth — bundle the actual .jar into overrides/mods/ only.
+          // Do NOT list it in files[] (no allowed HTTPS download); it ships via overrides.
           const destJar = path.join(overrideModsDir, jar);
           fs.copyFileSync(jarPath, destJar);
-          newFiles.push({
-            path: `mods/${jar}`,
-            hashes: { sha512 },
-            downloads: [],
-            fileSize,
-            source: 'local',
-          });
           modsUnresolved.push(jar);
         }
       }
@@ -3845,6 +3854,15 @@ function registerIpc() {
       return { success: false, error: describeFileError(e, 'Could not read the manifest file.') };
     }
 
+    // Migrate legacy entries (missing sha1/sha512) to canonical entries.
+    try {
+      const migrated = await migrateManifestEntries(manifest, { root, versionsDir });
+      manifest = { ...manifest, files: migrated };
+    } catch (e: any) {
+      const payload = toErrorPayload(e);
+      return { success: false, error: `${payload.code}: ${payload.detail ?? e?.message ?? 'migration failed'}` };
+    }
+
     // ── Save release snapshot + changelog and commit ───────────────────────────
 
     if (changelog !== undefined) {
@@ -3879,7 +3897,9 @@ function registerIpc() {
           manifest: {
             ...manifest,
             versionId: version,
-            files: manifest.files.map(({ source: _s, ...rest }: any) => rest),
+            files: manifest.files
+        .map(({ source: _s, ...rest }: any) => rest)
+        .sort((a: any, b: any) => String(a.path).localeCompare(String(b.path))),
           },
           overrideHashes,
         };
@@ -3918,7 +3938,9 @@ function registerIpc() {
         minecraft: store.get('minecraftVersion') || '1.21.1',
         'fabric-loader': store.get('fabricLoaderVersion') || '0.16.9',
       },
-      files: manifest.files.map(({ source: _s, ...rest }: any) => rest),
+      files: manifest.files
+        .map(({ source: _s, ...rest }: any) => rest)
+        .sort((a: any, b: any) => String(a.path).localeCompare(String(b.path))),
     };
 
     try {
@@ -3981,7 +4003,22 @@ function registerIpc() {
 
       sendP('zipping', 'Creating .mrpack file…', 85);
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      zip.writeZip(outputPath);
+      const tmpOut = `${outputPath}.tmp-${process.pid}`;
+      zip.writeZip(tmpOut);
+
+      // Mandatory final validation
+      const vzip = new AdmZip(tmpOut);
+      const vnames = vzip.getEntries().map(e => e.entryName);
+      const vindexEntry = vzip.getEntry('modrinth.index.json');
+      if (!vindexEntry) throw new Error('MISSING_INDEX');
+      const vparsed = JSON.parse(vindexEntry.getData().toString('utf-8'));
+      const vviolations = [...validateMrpackIndex(vparsed), ...validateZipEntryNames(vnames)];
+      if (hasErrors(vviolations)) {
+        try { fs.unlinkSync(tmpOut); } catch {}
+        throw new Error(`MRPACK_INVALID_INDEX: ${vviolations.filter(v=>v.severity==='error').map(v=>v.message).join('; ')}`);
+      }
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+      fs.renameSync(tmpOut, outputPath);
 
       const size = fs.statSync(outputPath).size;
 

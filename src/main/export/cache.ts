@@ -3,9 +3,6 @@ import fs from 'fs';
 import { app } from 'electron';
 import type { ModrinthMeta } from './types';
 
-const CACHE_DIR = path.join(app.getPath('userData'), 'cache');
-const CACHE_FILE = path.join(CACHE_DIR, '.modpack_exporter_cache.json');
-
 class ModrinthCache {
   private path: string;
   private data: Record<string, ModrinthMeta>;
@@ -37,9 +34,18 @@ class ModrinthCache {
 
 let _cache: ModrinthCache | null = null;
 
+function defaultCacheFile(): string {
+  try {
+    if (app && typeof app.getPath === 'function') {
+      return path.join(app.getPath('userData'), 'cache', '.modpack_exporter_cache.json');
+    }
+  } catch {}
+  return path.join(process.cwd(), '.cache', '.modpack_exporter_cache.json');
+}
+
 function getCache(): ModrinthCache {
   if (!_cache) {
-    _cache = new ModrinthCache(CACHE_FILE);
+    _cache = new ModrinthCache(defaultCacheFile());
   }
   return _cache;
 }
