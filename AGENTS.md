@@ -101,7 +101,7 @@ Desktop tool for Minecraft modpack developers (Origin Realms Beyond) to sync mod
 ## mrpack export invariant (Pass 3)
 - Every exported/stored file entry carries lowercase hex `sha1` (40) AND `sha512` (128) plus `fileSize` and an allowed HTTPS download, OR goes to `overrides/`, OR the export fails. Never emit a pack without passing the validator.
 - Never write hashes by guessing. Hashing goes through the single streaming utility `src/main/export/hash.ts` (`hashFile`).
-- Manifest schema version for the hash cache is `HASH_CACHE_SCHEMA_VERSION` (currently 2); legacy entries are migrated lazily in memory during export via `migrateManifestEntries`.
+- Manifest schema version for the hash cache is `HASH_CACHE_SCHEMA_VERSION` (currently 3); legacy entries are migrated lazily in memory during export via `migrateManifestEntries` and resolved through local bytes -> stored hash (`/version_files`) -> strict CDN URL (`/version/{id}`), then cross-verified against Modrinth. `source`/`verified` are internal and never written to the pack.
 - Atomic export: write to a temp file, validate, then rename. Never leave a partial `.mrpack`.
 - Trusted download hosts: `cdn.modrinth.com`, `github.com`, `raw.githubusercontent.com`, `gitlab.com`.
 - Run `bun run verify:mrpack <file>` to validate an exported pack offline.

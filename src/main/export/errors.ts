@@ -19,6 +19,9 @@ export interface MrpackErrorDetail {
   detail?: string;
   expected?: string;
   actual?: string;
+  causes?: string[];
+  pathsTried?: string[];
+  cause?: string;
 }
 
 export class MrpackError extends Error {
@@ -30,14 +33,14 @@ export class MrpackError extends Error {
   }
 }
 
-export function toErrorPayload(e: unknown): { code: string; file?: string; pointer?: string; detail?: string } {
+export function toErrorPayload(e: unknown): { code: string; file?: string; pointer?: string; detail?: string; causes?: string[]; pathsTried?: string[]; cause?: string } {
   if (e instanceof MrpackError) {
     const d = e.detail;
-    return { code: d.code, file: d.file, pointer: d.pointer, detail: d.detail };
+    return { code: d.code, file: d.file, pointer: d.pointer, detail: d.detail, causes: d.causes, pathsTried: d.pathsTried, cause: d.cause };
   }
   if (e && typeof e === 'object' && 'code' in (e as any)) {
     const o = e as any;
-    return { code: String(o.code), file: o.file, pointer: o.pointer, detail: o.detail ?? o.message };
+    return { code: String(o.code), file: o.file, pointer: o.pointer, detail: o.detail ?? o.message, causes: o.causes, pathsTried: o.pathsTried, cause: o.cause };
   }
   return { code: 'UNKNOWN', detail: e instanceof Error ? e.message : String(e) };
 }

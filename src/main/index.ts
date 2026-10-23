@@ -3387,15 +3387,19 @@ function registerIpc() {
           const jar = jarFiles[i];
           sendP('autopush', `Checking ${jar}…`, 3 + Math.floor(((i + 1) / jarFiles.length) * 9));
           const jarPath = path.join(modsDir, jar);
-          let sha512: string;
-          try { sha512 = computeSha512(jarPath); } catch { continue; }
-          const fileSize = fs.statSync(jarPath).size;
-          const info = await lookupModrinthHash(sha512, jar, autoCache);
+          let localHashes: { sha1: string; sha512: string; size: number };
+          try { localHashes = await hashFile(jarPath); } catch { continue; }
+          const info = await lookupModrinthHash(localHashes.sha512, jar, autoCache);
           if (info.found && info.downloadUrl) {
-            newFiles.push({ path: `mods/${info.slug}.jar`, hashes: { sha512 }, downloads: [info.downloadUrl], fileSize: info.fileSize ?? fileSize });
+            if (info.sha512 && info.sha512 !== localHashes.sha512) continue;
+            newFiles.push({
+              path: `mods/${info.slug}.jar`,
+              hashes: { sha1: localHashes.sha1, sha512: localHashes.sha512 },
+              downloads: [info.downloadUrl],
+              fileSize: info.fileSize ?? localHashes.size,
+            });
           } else {
             fs.copyFileSync(jarPath, path.join(overrideModsDir, jar));
-            newFiles.push({ path: `mods/${jar}`, hashes: { sha512 }, downloads: [], fileSize, source: 'local' });
           }
         }
         saveModrinthCache(versionsDir, autoCache);
@@ -3763,12 +3767,19 @@ function registerIpc() {
     }
 
     // Migrate legacy entries (missing sha1/sha512) to canonical entries.
+    let exportWarnings: string[] = [];
     try {
       const migrated = await migrateManifestEntries(manifest, { root, versionsDir });
+      exportWarnings = Array.isArray((migrated as any).warnings) ? (migrated as any).warnings : [];
       manifest = { ...manifest, files: migrated };
     } catch (e: any) {
       const payload = toErrorPayload(e);
-      return { success: false, error: `${payload.code}: ${payload.detail ?? e?.message ?? 'migration failed'}` };
+      return {
+        success: false,
+        error: `${payload.code}: ${payload.detail ?? e?.message ?? 'migration failed'}`,
+        errorDetail: payload,
+        warnings: exportWarnings,
+      };
     }
 
     // ── Save release snapshot + changelog and commit ───────────────────────────
@@ -3806,7 +3817,7 @@ function registerIpc() {
             ...manifest,
             versionId: version,
             files: manifest.files
-        .map(({ source: _s, ...rest }: any) => rest)
+        .map(({ source: _s, verified: _v, ...rest }: any) => rest)
         .sort((a: any, b: any) => String(a.path).localeCompare(String(b.path))),
           },
           overrideHashes,
@@ -3847,7 +3858,7 @@ function registerIpc() {
         'fabric-loader': store.get('fabricLoaderVersion') || '0.16.9',
       },
       files: manifest.files
-        .map(({ source: _s, ...rest }: any) => rest)
+        .map(({ source: _s, verified: _v, ...rest }: any) => rest)
         .sort((a: any, b: any) => String(a.path).localeCompare(String(b.path))),
     };
 
@@ -3954,11 +3965,12 @@ function registerIpc() {
           size,
           published: true,
           publishedVersionId: publish.versionId,
+          warnings: exportWarnings,
         };
       }
 
       sendP('done', 'Export complete!', 100);
-      return { success: true, path: outputPath, size };
+      return { success: true, path: outputPath, size, warnings: exportWarnings };
     } catch (e: any) {
       return { success: false, error: describeFileError(e, 'Could not create the .mrpack file.') };
     }

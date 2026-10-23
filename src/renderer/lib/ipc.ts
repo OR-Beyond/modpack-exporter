@@ -122,7 +122,7 @@ export const ipc = {
       overwriteSnapshot?: boolean;
       includeFancyMenu?: boolean;
       includeDefaultOptions?: boolean;
-    }): Promise<{ success: boolean; path?: string; size?: number; published?: boolean; publishedVersionId?: string; error?: string }> =>
+    }): Promise<{ success: boolean; path?: string; size?: number; published?: boolean; publishedVersionId?: string; error?: string; errorDetail?: import('./types').MrpackErrorDetail; warnings?: string[] }> =>
       window.electron.export.mrpack(o),
     saveDialog: (opts: { defaultPath?: string }): Promise<string | null> =>
       window.electron.export.saveDialog(opts),

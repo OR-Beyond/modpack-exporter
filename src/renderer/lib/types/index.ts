@@ -125,6 +125,17 @@ export interface ExportOptions {
   exportDir?: string;
 }
 
+export interface MrpackErrorDetail {
+  code: string;
+  detail?: string;
+  file?: string;
+  causes?: string[];
+  pathsTried?: string[];
+  cause?: string;
+  expected?: string;
+  actual?: string;
+}
+
 export interface ExportResult {
   success: boolean;
   output_path?: string;
@@ -369,7 +380,7 @@ declare global {
       };
       export: {
         run: (o: ExportOptions) => Promise<ExportResult>;
-        mrpack: (o: { outputPath: string; version: string; changelog?: string; overwriteSnapshot?: boolean; includeFancyMenu?: boolean; includeDefaultOptions?: boolean }) => Promise<{ success: boolean; path?: string; size?: number; published?: boolean; publishedVersionId?: string; error?: string }>;
+        mrpack: (o: { outputPath: string; version: string; changelog?: string; overwriteSnapshot?: boolean; includeFancyMenu?: boolean; includeDefaultOptions?: boolean }) => Promise<{ success: boolean; path?: string; size?: number; published?: boolean; publishedVersionId?: string; error?: string; errorDetail?: MrpackErrorDetail; warnings?: string[] }>;
         saveDialog: (opts: { defaultPath?: string }) => Promise<string | null>;
         latestModrinthVersion: (projectId: string) => Promise<{ version_number: string | null; versionId?: string; publishedAt?: string; reason?: string }>;
         manifestVersion: () => Promise<{ success: boolean; versionId: number | null; error?: string }>;

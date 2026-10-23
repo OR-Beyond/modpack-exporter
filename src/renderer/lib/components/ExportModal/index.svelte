@@ -10,7 +10,7 @@
   import Package from '@lucide/svelte/icons/package';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import Upload from '@lucide/svelte/icons/upload';
-  import type { AppConfig, ChangelogDiff, ChangelogResult } from '../../types';
+  import type { AppConfig, ChangelogDiff, ChangelogResult, MrpackErrorDetail } from '../../types';
   import Modal from '../base/Modal.svelte';
   import ModalHeader from '../base/ModalHeader.svelte';
   import ModalBody from '../base/ModalBody.svelte';
@@ -24,6 +24,7 @@
   import { bumpPatch, formatSize } from '../../utils/format';
   import { toast } from '../../state/toast.svelte';
   import { ipc } from '../../ipc';
+  import { i18n } from '../../i18n/index.svelte';
 
   interface Props {
     config: AppConfig;
@@ -49,6 +50,7 @@
   let phase = $state<Phase>('form');
   let progress = $state<ProgressState>({ stage: '', message: '', percent: 0 });
   let error = $state<string | null>(null);
+  let errorDetail = $state<MrpackErrorDetail | null>(null);
   let fileSize = $state<number | null>(null);
   let published = $state(false);
   let changelogResult = $state<ChangelogResult | null>(null);
@@ -132,9 +134,26 @@
     }
   }
 
+  function translated(key: string): string | null {
+    const value = i18n.t(key);
+    return value === key ? null : value;
+  }
+
+  function errorTitle(): string {
+    if (!errorDetail) return error ?? '';
+    const translatedTitle = translated(`errors.export.${errorDetail.code}`);
+    return translatedTitle ?? errorDetail.detail ?? error ?? '';
+  }
+
+  function errorCauses(): string[] {
+    const causes = errorDetail?.causes ?? (errorDetail?.cause ? [errorDetail.cause] : []);
+    return causes.map(c => translated(`errors.export.cause.${c}`) ?? c.replace(/-/g, ' '));
+  }
+
   async function handleExport() {
     if (!outputPath || !version.trim()) return;
     error = null;
+    errorDetail = null;
     published = false;
     progress = { stage: '', message: 'Starting…', percent: 0 };
     phase = 'exporting';
@@ -163,10 +182,12 @@
         );
       } else {
         error = r.error ?? 'Export failed';
+        errorDetail = r.errorDetail ?? null;
         phase = 'error';
       }
     } catch (e: any) {
       error = e?.message ?? 'Unexpected error during export';
+      errorDetail = null;
       phase = 'error';
     } finally {
       unsub();
@@ -390,7 +411,14 @@
           <AlertCircle size={14} class="text-danger mt-0.5 flex-shrink-0" />
           <div class="min-w-0">
             <p class="text-xs font-semibold mb-0.5 text-danger">Export failed</p>
-            <p class="text-xs break-words leading-relaxed text-muted-foreground">{error}</p>
+            <p class="text-xs break-words leading-relaxed text-muted-foreground">{errorTitle()}</p>
+            {#if errorCauses().length > 0}
+              <ul class="mt-1.5 space-y-0.5 list-disc list-inside text-xs text-muted-foreground">
+                {#each errorCauses() as cause (cause)}
+                  <li>{cause}</li>
+                {/each}
+              </ul>
+            {/if}
           </div>
         </div>
       </div>
